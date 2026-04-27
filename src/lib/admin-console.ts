@@ -165,13 +165,16 @@ const getApprovedDriversServerFn = createServerFn({ method: "GET" }).handler(asy
 
   if (error) throw new Error(error.message);
 
-  return ((data ?? []) as DriverRow[]).map((driver) => ({
-    userId: driver.user_id,
-    name: driver.name,
-    loginId: driver.login_id,
-    phoneNumber: driver.phone_number,
-    createdAt: driver.created_at,
-  } satisfies ApprovedDriver));
+  return ((data ?? []) as DriverRow[]).map(
+    (driver) =>
+      ({
+        userId: driver.user_id,
+        name: driver.name,
+        loginId: driver.login_id,
+        phoneNumber: driver.phone_number,
+        createdAt: driver.created_at,
+      }) satisfies ApprovedDriver,
+  );
 });
 
 const assignDriverToBusServerFn = createServerFn({ method: "POST" })
@@ -211,23 +214,28 @@ const getOperationQueueServerFn = createServerFn({ method: "GET" }).handler(asyn
 
   const { data, error } = await adminSupabase
     .from("operation_events")
-    .select("id, event_type, driver_user_id, driver_name, bus_id, bus_number, distance_km, speed_kmh, created_at")
+    .select(
+      "id, event_type, driver_user_id, driver_name, bus_id, bus_number, distance_km, speed_kmh, created_at",
+    )
     .order("created_at", { ascending: false })
     .limit(30);
 
   if (error) throw new Error(error.message);
 
-  return ((data ?? []) as OperationEventRow[]).map((row) => ({
-    id: row.id,
-    eventType: row.event_type,
-    driverUserId: row.driver_user_id,
-    driverName: row.driver_name,
-    busId: row.bus_id,
-    busNumber: row.bus_number,
-    distanceKm: row.distance_km,
-    speedKmh: row.speed_kmh,
-    createdAt: row.created_at,
-  } satisfies OperationQueueItem));
+  return ((data ?? []) as OperationEventRow[]).map(
+    (row) =>
+      ({
+        id: row.id,
+        eventType: row.event_type,
+        driverUserId: row.driver_user_id,
+        driverName: row.driver_name,
+        busId: row.bus_id,
+        busNumber: row.bus_number,
+        distanceKm: row.distance_km,
+        speedKmh: row.speed_kmh,
+        createdAt: row.created_at,
+      }) satisfies OperationQueueItem,
+  );
 });
 
 const getAdminNotificationsServerFn = createServerFn({ method: "GET" }).handler(async () => {
@@ -241,17 +249,22 @@ const getAdminNotificationsServerFn = createServerFn({ method: "GET" }).handler(
 
   if (error) throw new Error(error.message);
 
-  return ((data ?? []) as NotificationRow[]).map((row) => ({
-    id: row.id,
-    title: row.title,
-    message: row.message,
-    targetRole: row.target_role,
-    createdAt: row.created_at,
-  } satisfies AdminNotification));
+  return ((data ?? []) as NotificationRow[]).map(
+    (row) =>
+      ({
+        id: row.id,
+        title: row.title,
+        message: row.message,
+        targetRole: row.target_role,
+        createdAt: row.created_at,
+      }) satisfies AdminNotification,
+  );
 });
 
 const sendAdminNotificationServerFn = createServerFn({ method: "POST" })
-  .inputValidator((data: { title: string; message: string; targetRole: NotificationTargetRole }) => data)
+  .inputValidator(
+    (data: { title: string; message: string; targetRole: NotificationTargetRole }) => data,
+  )
   .handler(async ({ data }) => {
     const adminSupabase = getAdminSupabaseClient();
 

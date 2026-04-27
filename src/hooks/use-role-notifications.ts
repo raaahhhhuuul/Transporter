@@ -41,13 +41,16 @@ export function useRoleNotifications(role: AppRoleForNotifications, refreshMs = 
         return;
       }
 
-      const mapped = ((data ?? []) as NotificationRow[]).map((item) => ({
-        id: item.id,
-        title: item.title,
-        message: item.message,
-        targetRole: item.target_role,
-        createdAt: item.created_at,
-      } satisfies RoleNotification));
+      const mapped = ((data ?? []) as NotificationRow[]).map(
+        (item) =>
+          ({
+            id: item.id,
+            title: item.title,
+            message: item.message,
+            targetRole: item.target_role,
+            createdAt: item.created_at,
+          }) satisfies RoleNotification,
+      );
 
       setNotifications(mapped);
       setLoading(false);

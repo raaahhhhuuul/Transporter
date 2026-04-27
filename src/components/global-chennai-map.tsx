@@ -35,7 +35,10 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
       // Fix default marker assets in bundlers.
       delete (leaflet.Icon.Default.prototype as { _getIconUrl?: unknown })._getIconUrl;
       leaflet.Icon.Default.mergeOptions({
-        iconRetinaUrl: new URL("leaflet/dist/images/marker-icon-2x.png", import.meta.url).toString(),
+        iconRetinaUrl: new URL(
+          "leaflet/dist/images/marker-icon-2x.png",
+          import.meta.url,
+        ).toString(),
         iconUrl: new URL("leaflet/dist/images/marker-icon.png", import.meta.url).toString(),
         shadowUrl: new URL("leaflet/dist/images/marker-shadow.png", import.meta.url).toString(),
       });
@@ -85,8 +88,7 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
 
     return leafletModule.divIcon({
       className: "",
-      html:
-        "<div style='position:relative;width:14px;height:14px;border-radius:9999px;background:#d7c2c2;border:2px solid rgba(80,46,46,.9);box-shadow:0 0 0 4px rgba(126,86,86,.2);'></div>",
+      html: "<div style='position:relative;width:14px;height:14px;border-radius:9999px;background:#d7c2c2;border:2px solid rgba(80,46,46,.9);box-shadow:0 0 0 4px rgba(126,86,86,.2);'></div>",
       iconSize: [14, 14],
       iconAnchor: [7, 7],
       popupAnchor: [0, -10],
@@ -107,9 +109,10 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
   const markerPosition: [number, number] = tracking
     ? [tracking.latitude, tracking.longitude]
     : BUS_MARKER;
-  const studentPosition: [number, number] | null =
-    studentLocation ? [studentLocation.latitude, studentLocation.longitude] : null;
-  const routePath = isStudentView ? route?.path ?? [] : [];
+  const studentPosition: [number, number] | null = studentLocation
+    ? [studentLocation.latitude, studentLocation.longitude]
+    : null;
+  const routePath = isStudentView ? (route?.path ?? []) : [];
   const mapCenter: [number, number] =
     isStudentView && studentPosition
       ? studentPosition
@@ -128,13 +131,7 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
     return null;
   }
 
-  function FocusStudentRoute({
-    path,
-    active,
-  }: {
-    path: Array<[number, number]>;
-    active: boolean;
-  }) {
+  function FocusStudentRoute({ path, active }: { path: Array<[number, number]>; active: boolean }) {
     const map = useMap();
 
     useEffect(() => {
@@ -159,7 +156,10 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
         {isStudentView && routePath.length > 1 ? (
-          <Polyline positions={routePath} pathOptions={{ color: "#8f4b4b", weight: 4, opacity: 0.9 }} />
+          <Polyline
+            positions={routePath}
+            pathOptions={{ color: "#8f4b4b", weight: 4, opacity: 0.9 }}
+          />
         ) : null}
         <FollowLiveBus position={markerPosition} active={Boolean(tracking?.isActive)} />
         {isStudentView ? (

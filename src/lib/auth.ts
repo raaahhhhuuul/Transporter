@@ -85,13 +85,15 @@ interface LoginApprovalRow {
   status: "pending" | "approved";
   requested_at: string;
   approved_at: string | null;
-  registrations?: {
-    name: string;
-    phone_number: string;
-  } | Array<{
-    name: string;
-    phone_number: string;
-  }>;
+  registrations?:
+    | {
+        name: string;
+        phone_number: string;
+      }
+    | Array<{
+        name: string;
+        phone_number: string;
+      }>;
 }
 
 const SESSION_KEY = "pulseride.session.v1";
@@ -242,7 +244,9 @@ const getPendingApprovalsServerFn = createServerFn({ method: "GET" }).handler(as
   }
 
   return (data ?? []).map((item) => {
-    const registration = Array.isArray(item.registrations) ? item.registrations[0] : item.registrations;
+    const registration = Array.isArray(item.registrations)
+      ? item.registrations[0]
+      : item.registrations;
 
     return {
       requestId: item.id as string,
@@ -324,9 +328,11 @@ const approveUserServerFn = createServerFn({ method: "POST" })
       phone_number: registration.phone_number,
     };
 
-    const { error: approvedInsertError } = await adminSupabase.from(tableName).upsert(approvedRecord, {
-      onConflict: "user_id",
-    });
+    const { error: approvedInsertError } = await adminSupabase
+      .from(tableName)
+      .upsert(approvedRecord, {
+        onConflict: "user_id",
+      });
 
     if (approvedInsertError) {
       throw new Error(approvedInsertError.message);
@@ -401,8 +407,16 @@ async function getRegistrationByUserId(userId: string) {
 
 async function getApprovedRoleAccount(userId: string) {
   const [{ data: student }, { data: driver }] = await Promise.all([
-    supabase.from("students").select("user_id, registration_id, login_id, name, phone_number, created_at").eq("user_id", userId).maybeSingle<ApprovedStudentRow>(),
-    supabase.from("drivers").select("user_id, registration_id, login_id, name, phone_number, created_at").eq("user_id", userId).maybeSingle<ApprovedDriverRow>(),
+    supabase
+      .from("students")
+      .select("user_id, registration_id, login_id, name, phone_number, created_at")
+      .eq("user_id", userId)
+      .maybeSingle<ApprovedStudentRow>(),
+    supabase
+      .from("drivers")
+      .select("user_id, registration_id, login_id, name, phone_number, created_at")
+      .eq("user_id", userId)
+      .maybeSingle<ApprovedDriverRow>(),
   ]);
 
   if (student) {
@@ -491,7 +505,11 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
 
   const approvedAccount = await getApprovedRoleAccount(data.user.id);
   if (approvedAccount) {
-    const session = setSession(approvedAccount.role, approvedAccount.loginId, data.session?.access_token);
+    const session = setSession(
+      approvedAccount.role,
+      approvedAccount.loginId,
+      data.session?.access_token,
+    );
     return {
       session,
       homeRoute: getHomeRouteForRole(approvedAccount.role),

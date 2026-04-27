@@ -61,8 +61,7 @@ function AdminDashboard() {
 
   const [notificationTitle, setNotificationTitle] = useState("");
   const [notificationMessage, setNotificationMessage] = useState("");
-  const [notificationTarget, setNotificationTarget] =
-    useState<NotificationTargetRole>("all");
+  const [notificationTarget, setNotificationTarget] = useState<NotificationTargetRole>("all");
   const [sendingNotification, setSendingNotification] = useState(false);
 
   const activeBusCount = useMemo(
@@ -72,14 +71,13 @@ function AdminDashboard() {
 
   const loadAdminData = useCallback(async () => {
     try {
-      const [pending, busRows, driverRows, queueRows, notificationRows] =
-        await Promise.all([
-          getPendingApprovals(),
-          getBuses(),
-          getApprovedDrivers(),
-          getOperationQueue(),
-          getAdminNotifications(),
-        ]);
+      const [pending, busRows, driverRows, queueRows, notificationRows] = await Promise.all([
+        getPendingApprovals(),
+        getBuses(),
+        getApprovedDrivers(),
+        getOperationQueue(),
+        getAdminNotifications(),
+      ]);
 
       setPendingApprovals(pending);
       setBuses(busRows);
@@ -88,8 +86,7 @@ function AdminDashboard() {
       setNotifications(notificationRows);
     } catch (error) {
       toast.error("Unable to load admin dashboard", {
-        description:
-          error instanceof Error ? error.message : "Please refresh and try again.",
+        description: error instanceof Error ? error.message : "Please refresh and try again.",
       });
     }
   }, []);
@@ -130,9 +127,7 @@ function AdminDashboard() {
         return;
       }
 
-      setPendingApprovals((current) =>
-        current.filter((user) => user.requestId !== requestId),
-      );
+      setPendingApprovals((current) => current.filter((user) => user.requestId !== requestId));
 
       const latestDrivers = await getApprovedDrivers();
       setDrivers(latestDrivers);
@@ -273,7 +268,10 @@ function AdminDashboard() {
         ) : (
           <div className="space-y-3">
             {pendingApprovals.map((user) => (
-              <div key={user.requestId} className="rounded-xl border border-border bg-surface p-3.5">
+              <div
+                key={user.requestId}
+                className="rounded-xl border border-border bg-surface p-3.5"
+              >
                 <div>
                   <p className="text-sm font-semibold text-foreground">{user.name}</p>
                   <p className="text-xs text-muted-foreground">
@@ -361,7 +359,10 @@ function AdminDashboard() {
           ) : (
             <div className="space-y-2.5">
               {operationQueue.map((eventItem) => (
-                <div key={eventItem.id} className="rounded-xl border border-border bg-surface p-3.5">
+                <div
+                  key={eventItem.id}
+                  className="rounded-xl border border-border bg-surface p-3.5"
+                >
                   <p className="text-sm font-semibold">
                     {eventItem.eventType === "trip_started" ? "Trip started" : "Trip ended"}
                   </p>
@@ -373,7 +374,8 @@ function AdminDashboard() {
                     <span>{new Date(eventItem.createdAt).toLocaleString()}</span>
                   </div>
                   <div className="mt-1 text-[11px] text-muted-foreground">
-                    Distance {eventItem.distanceKm.toFixed(2)} km · Speed {eventItem.speedKmh.toFixed(0)} km/h
+                    Distance {eventItem.distanceKm.toFixed(2)} km · Speed{" "}
+                    {eventItem.speedKmh.toFixed(0)} km/h
                   </div>
                 </div>
               ))}

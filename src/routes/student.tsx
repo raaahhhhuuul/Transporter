@@ -1,13 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Bus,
-  Gauge,
-  Route as RouteIcon,
-  MapPin,
-  Clock,
-  Radio,
-} from "lucide-react";
+import { Bus, Gauge, Route as RouteIcon, MapPin, Clock, Radio } from "lucide-react";
 import { getHomeRouteForRole, getSession } from "@/lib/auth";
 import { useLiveTracking } from "../hooks/use-live-tracking";
 import { useRoleNotifications } from "../hooks/use-role-notifications";
@@ -33,8 +26,7 @@ export const Route = createFileRoute("/student")({
       { title: "Student Dashboard - PulseRide" },
       {
         name: "description",
-        content:
-          "View your assigned bus details, live stop activity, and notifications.",
+        content: "View your assigned bus details, live stop activity, and notifications.",
       },
     ],
   }),
@@ -50,7 +42,10 @@ function StudentDashboard() {
     watch: false,
   });
   const [routeSummary, setRouteSummary] = useState<StudentRouteRecord | null>(null);
-  const [driverStartLocation, setDriverStartLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [driverStartLocation, setDriverStartLocation] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
   const lastFetchRef = useRef<{
     timestamp: number;
     driverLat: number;
@@ -74,9 +69,7 @@ function StudentDashboard() {
   }, [routeSummary]);
 
   /* format ISO timestamp to relative string */
-  const lastUpdated = tracking?.updatedAt
-    ? formatRelativeTime(tracking.updatedAt)
-    : null;
+  const lastUpdated = tracking?.updatedAt ? formatRelativeTime(tracking.updatedAt) : null;
 
   useEffect(() => {
     const driverUserId = tracking?.driverUserId;
@@ -120,7 +113,13 @@ function StudentDashboard() {
     return () => {
       isMounted = false;
     };
-  }, [tracking?.driverUserId, tracking?.isActive, tracking?.startedAt]);
+  }, [
+    tracking?.driverUserId,
+    tracking?.isActive,
+    tracking?.startedAt,
+    tracking?.latitude,
+    tracking?.longitude,
+  ]);
 
   useEffect(() => {
     if (!tracking?.isActive || !studentLocation) {
@@ -132,7 +131,8 @@ function StudentDashboard() {
     const previous = lastFetchRef.current;
     const now = Date.now();
     const movedDriverMeters = previous
-      ? haversineKm(previous.driverLat, previous.driverLng, tracking.latitude, tracking.longitude) * 1000
+      ? haversineKm(previous.driverLat, previous.driverLng, tracking.latitude, tracking.longitude) *
+        1000
       : Number.POSITIVE_INFINITY;
     const movedStudentMeters = previous
       ? haversineKm(
@@ -143,7 +143,10 @@ function StudentDashboard() {
         ) * 1000
       : Number.POSITIVE_INFINITY;
     const shouldRefetch =
-      !previous || now - previous.timestamp > 5000 || movedDriverMeters > 8 || movedStudentMeters > 8;
+      !previous ||
+      now - previous.timestamp > 5000 ||
+      movedDriverMeters > 8 ||
+      movedStudentMeters > 8;
 
     if (!shouldRefetch) return;
 
@@ -251,8 +254,7 @@ function StudentDashboard() {
     tracking?.latitude,
     tracking?.longitude,
     tracking?.speedKmh,
-    studentLocation?.latitude,
-    studentLocation?.longitude,
+    studentLocation,
     driverStartLocation?.lat,
     driverStartLocation?.lng,
   ]);
@@ -299,12 +301,16 @@ function StudentDashboard() {
                   {isActive && studentLocation && routeSummary ? (
                     <div className="mt-2 space-y-0.5 text-xs text-muted-foreground">
                       <p>
-                        Driver start: {formatLatLng(
+                        Driver start:{" "}
+                        {formatLatLng(
                           routeSummary.driverStartLatitude ?? tracking?.latitude ?? 0,
                           routeSummary.driverStartLongitude ?? tracking?.longitude ?? 0,
                         )}
                       </p>
-                      <p>Your location: {formatLatLng(studentLocation.latitude, studentLocation.longitude)}</p>
+                      <p>
+                        Your location:{" "}
+                        {formatLatLng(studentLocation.latitude, studentLocation.longitude)}
+                      </p>
                       <p>
                         Route to you: {routeSummary.distanceKm.toFixed(2)} km · ETA {routeEtaText}
                       </p>
@@ -323,9 +329,7 @@ function StudentDashboard() {
           {loading ? (
             <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
               <div className="flex min-h-20 items-center justify-center">
-                <p className="text-sm text-muted-foreground animate-pulse">
-                  Loading live data…
-                </p>
+                <p className="text-sm text-muted-foreground animate-pulse">Loading live data…</p>
               </div>
             </section>
           ) : isActive && tracking ? (
@@ -364,9 +368,7 @@ function StudentDashboard() {
             <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
               <div className="flex min-h-28 flex-col items-center justify-center rounded-xl border border-border bg-surface text-center">
                 <Bus className="h-8 w-8 text-muted-foreground" />
-                <p className="mt-2 text-base text-muted-foreground">
-                  No bus is currently active.
-                </p>
+                <p className="mt-2 text-base text-muted-foreground">No bus is currently active.</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   Live stats will appear here when a trip starts.
                 </p>
@@ -400,9 +402,7 @@ function StudentDashboard() {
                 )}
               </div>
             ) : (
-              <p className="mt-3 text-sm text-muted-foreground">
-                0 updates for now.
-              </p>
+              <p className="mt-3 text-sm text-muted-foreground">0 updates for now.</p>
             )}
           </section>
 
@@ -435,9 +435,7 @@ function StudentDashboard() {
                 </p>
               </div>
             ) : (
-              <p className="mt-3 text-sm text-muted-foreground">
-                0 unread notifications.
-              </p>
+              <p className="mt-3 text-sm text-muted-foreground">0 unread notifications.</p>
             )}
           </section>
         </div>
@@ -479,17 +477,11 @@ function InfoTile({
     <div className="rounded-xl border border-border bg-surface p-3">
       <div className="flex items-center gap-1.5 text-muted-foreground">
         {icon}
-        <span className="text-[10px] font-semibold uppercase tracking-wider">
-          {label}
-        </span>
+        <span className="text-[10px] font-semibold uppercase tracking-wider">{label}</span>
       </div>
       <div className="mt-1 flex items-baseline gap-0.5">
-        <span className="font-display text-lg font-bold tabular-nums">
-          {value}
-        </span>
-        <span className="text-xs font-medium text-muted-foreground">
-          {suffix}
-        </span>
+        <span className="font-display text-lg font-bold tabular-nums">{value}</span>
+        <span className="text-xs font-medium text-muted-foreground">{suffix}</span>
       </div>
     </div>
   );
@@ -512,9 +504,7 @@ function ActivityRow({
       {icon}
       <span className="flex-1 text-xs font-medium text-foreground">{text}</span>
       {time && (
-        <span className="text-[10px] font-medium text-muted-foreground shrink-0">
-          {time}
-        </span>
+        <span className="text-[10px] font-medium text-muted-foreground shrink-0">{time}</span>
       )}
     </div>
   );

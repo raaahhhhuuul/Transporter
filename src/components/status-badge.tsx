@@ -4,10 +4,7 @@ import type { ReactNode } from "react";
 
 type Status = "active" | "delayed" | "arrived" | "inactive";
 
-const config: Record<
-  Status,
-  { label: string; classes: string; icon: ReactNode }
-> = {
+const config: Record<Status, { label: string; classes: string; icon: ReactNode }> = {
   active: {
     label: "On Route",
     classes: "bg-success/15 text-success border-success/30",
@@ -30,13 +27,7 @@ const config: Record<
   },
 };
 
-export function StatusBadge({
-  status,
-  className,
-}: {
-  status: Status;
-  className?: string;
-}) {
+export function StatusBadge({ status, className }: { status: Status; className?: string }) {
   const c = config[status];
   return (
     <span

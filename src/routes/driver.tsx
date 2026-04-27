@@ -35,14 +35,12 @@ export const Route = createFileRoute("/driver")({
       { title: "Driver Console — PulseRide" },
       {
         name: "description",
-        content:
-          "Start and end trips, monitor live GPS coordinates, and update bus status.",
+        content: "Start and end trips, monitor live GPS coordinates, and update bus status.",
       },
       { property: "og:title", content: "Driver Console — PulseRide" },
       {
         property: "og:description",
-        content:
-          "Start and end trips, monitor live GPS coordinates, and update bus status.",
+        content: "Start and end trips, monitor live GPS coordinates, and update bus status.",
       },
     ],
   }),
@@ -52,12 +50,7 @@ export const Route = createFileRoute("/driver")({
 /* ------------------------------------------------------------------ */
 /*  Haversine — distance in km between two GPS points                 */
 /* ------------------------------------------------------------------ */
-function haversineKm(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
@@ -73,9 +66,7 @@ function haversineKm(
 /* ------------------------------------------------------------------ */
 function DriverPanel() {
   const [active, setActive] = useState(false);
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
-    null
-  );
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [speed, setSpeed] = useState(0);
   const [distance, setDistance] = useState(0);
   const [elapsed, setElapsed] = useState(0);
@@ -135,9 +126,7 @@ function DriverPanel() {
 
   /* ---- Start Trip ---- */
   const handleStart = () => {
-    const confirmed = window.confirm(
-      "Share your live location with students and start this trip?"
-    );
+    const confirmed = window.confirm("Share your live location with students and start this trip?");
     if (!confirmed) return;
 
     if (!navigator.geolocation) {
@@ -200,7 +189,7 @@ function DriverPanel() {
                 prevCoordsRef.current.lat,
                 prevCoordsRef.current.lng,
                 lat,
-                lng
+                lng,
               );
               const previousSampleTime = prevTimestampRef.current ?? sampleTime;
               const seconds = Math.max((sampleTime - previousSampleTime) / 1000, 1);
@@ -224,7 +213,7 @@ function DriverPanel() {
             }
           },
           (err) => console.error("GPS watch error:", err),
-          { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
+          { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 },
         );
 
         /* elapsed timer — 1 s tick */
@@ -248,7 +237,7 @@ function DriverPanel() {
         toast.dismiss("gps-acquire");
         toast.error("Location access denied", { description: err.message });
       },
-      { enableHighAccuracy: true, timeout: 15000 }
+      { enableHighAccuracy: true, timeout: 15000 },
     );
   };
 
@@ -453,17 +442,11 @@ function StatTile({
     <div className="rounded-2xl border border-border bg-card p-3.5 shadow-card">
       <div className="flex items-center gap-1.5 text-muted-foreground">
         {icon}
-        <span className="text-[10px] font-semibold uppercase tracking-wider">
-          {label}
-        </span>
+        <span className="text-[10px] font-semibold uppercase tracking-wider">{label}</span>
       </div>
       <div className="mt-1.5 flex items-baseline gap-1">
         <span className="font-display text-xl font-bold">{value}</span>
-        {suffix && (
-          <span className="text-xs font-medium text-muted-foreground">
-            {suffix}
-          </span>
-        )}
+        {suffix && <span className="text-xs font-medium text-muted-foreground">{suffix}</span>}
       </div>
     </div>
   );

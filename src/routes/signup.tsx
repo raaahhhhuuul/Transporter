@@ -112,7 +112,9 @@ function SignUpPage() {
               type="button"
               onClick={() => setRole("student")}
               className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-                role === "student" ? "bg-cyan-500/20 text-cyan-200" : "text-slate-300 hover:bg-slate-800"
+                role === "student"
+                  ? "bg-cyan-500/20 text-cyan-200"
+                  : "text-slate-300 hover:bg-slate-800"
               }`}
             >
               Student Signup
@@ -121,7 +123,9 @@ function SignUpPage() {
               type="button"
               onClick={() => setRole("driver")}
               className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-                role === "driver" ? "bg-cyan-500/20 text-cyan-200" : "text-slate-300 hover:bg-slate-800"
+                role === "driver"
+                  ? "bg-cyan-500/20 text-cyan-200"
+                  : "text-slate-300 hover:bg-slate-800"
               }`}
             >
               Driver Signup
@@ -138,7 +142,9 @@ function SignUpPage() {
               type="text"
             />
             <InputRow
-              icon={role === "student" ? <Mail className="h-4 w-4" /> : <Truck className="h-4 w-4" />}
+              icon={
+                role === "student" ? <Mail className="h-4 w-4" /> : <Truck className="h-4 w-4" />
+              }
               label={role === "student" ? "Student email" : "Driver login ID"}
               placeholder={role === "student" ? "name@srmist.edu.in" : "driver001"}
               value={loginId}

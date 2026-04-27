@@ -52,8 +52,12 @@ function parseRoute(value: unknown): StudentRouteRecord | null {
     driverLongitude: maybe.driverLongitude,
     studentLatitude: maybe.studentLatitude,
     studentLongitude: maybe.studentLongitude,
-    driverStartLatitude: isValidNumber(maybe.driverStartLatitude) ? maybe.driverStartLatitude : null,
-    driverStartLongitude: isValidNumber(maybe.driverStartLongitude) ? maybe.driverStartLongitude : null,
+    driverStartLatitude: isValidNumber(maybe.driverStartLatitude)
+      ? maybe.driverStartLatitude
+      : null,
+    driverStartLongitude: isValidNumber(maybe.driverStartLongitude)
+      ? maybe.driverStartLongitude
+      : null,
     distanceKm: maybe.distanceKm,
     durationMin: maybe.durationMin,
     etaMinutes: maybe.etaMinutes,
@@ -64,7 +68,9 @@ function parseRoute(value: unknown): StudentRouteRecord | null {
 
 function emitRouteUpdate(route: StudentRouteRecord | null) {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent<StudentRouteRecord | null>(STUDENT_ROUTE_EVENT, { detail: route }));
+  window.dispatchEvent(
+    new CustomEvent<StudentRouteRecord | null>(STUDENT_ROUTE_EVENT, { detail: route }),
+  );
 }
 
 export function getCachedStudentRoute(): StudentRouteRecord | null {
@@ -94,7 +100,9 @@ export function clearStudentRoute(): void {
   emitRouteUpdate(null);
 }
 
-export function subscribeToStudentRoute(onChange: (route: StudentRouteRecord | null) => void): () => void {
+export function subscribeToStudentRoute(
+  onChange: (route: StudentRouteRecord | null) => void,
+): () => void {
   if (typeof window === "undefined") return () => {};
 
   const onCustom = (event: Event) => {

@@ -1,22 +1,9 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { motion } from "framer-motion";
-import {
-  Bus,
-  Mail,
-  Lock,
-  Eye,
-  EyeOff,
-  AlertCircle,
-  Loader2,
-  UserPlus,
-} from "lucide-react";
+import { Bus, Mail, Lock, Eye, EyeOff, AlertCircle, Loader2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import {
-  getHomeRouteForRole,
-  getSession,
-  signIn,
-} from "../lib/auth";
+import { getHomeRouteForRole, getSession, signIn } from "../lib/auth";
 
 export const Route = createFileRoute("/login")({
   beforeLoad: () => {

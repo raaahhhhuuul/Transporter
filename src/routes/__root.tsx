@@ -1,4 +1,11 @@
-import { Outlet, Link, createRootRoute, HeadContent, Scripts, useRouterState } from "@tanstack/react-router";
+import {
+  Outlet,
+  Link,
+  createRootRoute,
+  HeadContent,
+  Scripts,
+  useRouterState,
+} from "@tanstack/react-router";
 import { Navbar } from "@/components/navbar";
 import { AppToaster } from "@/components/app-toaster";
 import { GlobalChennaiMap } from "@/components/global-chennai-map";
@@ -33,14 +40,23 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "PulseRide — Smart Bus Tracking" },
-      { name: "description", content: "Track your campus bus in real time with live ETA, route, and driver info." },
+      {
+        name: "description",
+        content: "Track your campus bus in real time with live ETA, route, and driver info.",
+      },
       { name: "author", content: "PulseRide" },
       { property: "og:title", content: "PulseRide — Smart Bus Tracking" },
-      { property: "og:description", content: "Track your campus bus in real time with live ETA, route, and driver info." },
+      {
+        property: "og:description",
+        content: "Track your campus bus in real time with live ETA, route, and driver info.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      { rel: "icon", type: "image/png", href: "/favicon.png" },
+    ],
   }),
   shellComponent: RootShell,
   component: RootComponent,

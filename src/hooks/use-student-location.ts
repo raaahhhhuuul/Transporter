@@ -15,7 +15,9 @@ export function useStudentLocation(options: UseStudentLocationOptions = {}) {
   const enabled = options.enabled ?? true;
   const watch = options.watch ?? false;
 
-  const [location, setLocation] = useState<StudentLocationRecord | null>(() => getCachedStudentLocation());
+  const [location, setLocation] = useState<StudentLocationRecord | null>(() =>
+    getCachedStudentLocation(),
+  );
   const [loading, setLoading] = useState(enabled && watch);
   const [error, setError] = useState<string | null>(null);
 

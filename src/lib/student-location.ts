@@ -34,7 +34,9 @@ function parseLocation(value: unknown): StudentLocationRecord | null {
 
 function emitLocationUpdate(location: StudentLocationRecord | null) {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent<StudentLocationRecord | null>(STUDENT_LOCATION_EVENT, { detail: location }));
+  window.dispatchEvent(
+    new CustomEvent<StudentLocationRecord | null>(STUDENT_LOCATION_EVENT, { detail: location }),
+  );
 }
 
 export function getCachedStudentLocation(): StudentLocationRecord | null {

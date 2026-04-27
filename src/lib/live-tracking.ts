@@ -101,7 +101,9 @@ function toRecordFromRemote(row: RemoteTrackingRow): LiveTrackingRecord {
 
 function emitTrackingUpdate(record: LiveTrackingRecord | null) {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent<LiveTrackingRecord | null>(TRACKING_EVENT, { detail: record }));
+  window.dispatchEvent(
+    new CustomEvent<LiveTrackingRecord | null>(TRACKING_EVENT, { detail: record }),
+  );
 }
 
 function cacheTracking(record: LiveTrackingRecord | null) {
@@ -242,7 +244,9 @@ export async function getLatestDriverTracking(): Promise<LiveTrackingRecord | nu
   return cached;
 }
 
-export async function getDriverTripStartLocation(driverUserId: string): Promise<TripStartLocation | null> {
+export async function getDriverTripStartLocation(
+  driverUserId: string,
+): Promise<TripStartLocation | null> {
   try {
     const { data, error } = await supabase
       .from("operation_events")
