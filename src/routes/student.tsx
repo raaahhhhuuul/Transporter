@@ -7,6 +7,7 @@ import { useRoleNotifications } from "../hooks/use-role-notifications";
 import { useStudentLocation } from "../hooks/use-student-location";
 import { clearStudentRoute, saveStudentRoute, type StudentRouteRecord } from "../lib/student-route";
 import { getDriverTripStartLocation } from "../lib/live-tracking";
+import { haversineKm } from "@/lib/utils";
 
 export const Route = createFileRoute("/student")({
   beforeLoad: () => {
@@ -38,9 +39,11 @@ function StudentDashboard() {
   const { tracking, loading } = useLiveTracking();
   const { notifications, loading: notificationsLoading } = useRoleNotifications("student");
   const { location: studentLocation, error: studentLocationError } = useStudentLocation({
-    enabled: true,
     watch: false,
   });
+
+  const sLat = studentLocation?.latitude;
+  const sLng = studentLocation?.longitude;
   const [routeSummary, setRouteSummary] = useState<StudentRouteRecord | null>(null);
   const [driverStartLocation, setDriverStartLocation] = useState<{
     lat: number;
@@ -122,7 +125,7 @@ function StudentDashboard() {
   ]);
 
   useEffect(() => {
-    if (!tracking?.isActive || !studentLocation) {
+    if (!tracking?.isActive || sLat === undefined || sLng === undefined) {
       setRouteSummary(null);
       clearStudentRoute();
       return;
@@ -135,12 +138,7 @@ function StudentDashboard() {
         1000
       : Number.POSITIVE_INFINITY;
     const movedStudentMeters = previous
-      ? haversineKm(
-          previous.studentLat,
-          previous.studentLng,
-          studentLocation.latitude,
-          studentLocation.longitude,
-        ) * 1000
+      ? haversineKm(previous.studentLat, previous.studentLng, sLat!, sLng!) * 1000
       : Number.POSITIVE_INFINITY;
     const shouldRefetch =
       !previous ||
@@ -154,28 +152,23 @@ function StudentDashboard() {
       timestamp: now,
       driverLat: tracking.latitude,
       driverLng: tracking.longitude,
-      studentLat: studentLocation.latitude,
-      studentLng: studentLocation.longitude,
+      studentLat: sLat!,
+      studentLng: sLng!,
     };
 
     const controller = new AbortController();
     let isMounted = true;
 
     const saveFallbackRoute = () => {
-      const linearDistanceKm = haversineKm(
-        tracking.latitude,
-        tracking.longitude,
-        studentLocation.latitude,
-        studentLocation.longitude,
-      );
+      const linearDistanceKm = haversineKm(tracking.latitude, tracking.longitude, sLat!, sLng!);
       const assumedSpeed = Math.max(tracking.speedKmh, 18);
       const durationMin = (linearDistanceKm / assumedSpeed) * 60;
 
       const fallback: StudentRouteRecord = {
         driverLatitude: tracking.latitude,
         driverLongitude: tracking.longitude,
-        studentLatitude: studentLocation.latitude,
-        studentLongitude: studentLocation.longitude,
+        studentLatitude: sLat!,
+        studentLongitude: sLng!,
         driverStartLatitude: driverStartLocation?.lat ?? null,
         driverStartLongitude: driverStartLocation?.lng ?? null,
         distanceKm: linearDistanceKm,
@@ -183,7 +176,7 @@ function StudentDashboard() {
         etaMinutes: Math.max(1, durationMin),
         path: [
           [tracking.latitude, tracking.longitude],
-          [studentLocation.latitude, studentLocation.longitude],
+          [sLat!, sLng!],
         ],
         updatedAt: new Date().toISOString(),
       };
@@ -197,7 +190,7 @@ function StudentDashboard() {
       try {
         const url =
           `https://router.project-osrm.org/route/v1/driving/` +
-          `${tracking.longitude},${tracking.latitude};${studentLocation.longitude},${studentLocation.latitude}` +
+          `${tracking.longitude},${tracking.latitude};${sLng},${sLat}` +
           `?overview=full&geometries=geojson`;
 
         const response = await fetch(url, { signal: controller.signal });
@@ -223,8 +216,8 @@ function StudentDashboard() {
         const next: StudentRouteRecord = {
           driverLatitude: tracking.latitude,
           driverLongitude: tracking.longitude,
-          studentLatitude: studentLocation.latitude,
-          studentLongitude: studentLocation.longitude,
+          studentLatitude: sLat!,
+          studentLongitude: sLng!,
           driverStartLatitude: driverStartLocation?.lat ?? null,
           driverStartLongitude: driverStartLocation?.lng ?? null,
           distanceKm: route.distance / 1000,
@@ -254,7 +247,8 @@ function StudentDashboard() {
     tracking?.latitude,
     tracking?.longitude,
     tracking?.speedKmh,
-    studentLocation,
+    sLat,
+    sLng,
     driverStartLocation?.lat,
     driverStartLocation?.lng,
   ]);
@@ -442,17 +436,6 @@ function StudentDashboard() {
       </div>
     </div>
   );
-}
-
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function formatLatLng(lat: number, lng: number): string {
