@@ -26,3 +26,4 @@
 ## Important After Pulling Latest Changes
 
 - Re-run `supabase/schema.sql` so the new tables and policies are created.
+- For full Cloudflare Workers serverless deployment steps, see `SERVERLESS_DEPLOYMENT.md`.

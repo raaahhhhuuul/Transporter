@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
+import { getServerSupabaseConfig } from "@/lib/server-env";
 
 export type BusStatus = "active" | "inactive" | "maintenance";
 export type OperationEventType = "trip_started" | "trip_ended";
@@ -83,16 +84,14 @@ interface NotificationRow {
   created_at: string;
 }
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-
 function getAdminSupabaseClient() {
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { supabaseUrl, serviceRoleKey } = getServerSupabaseConfig();
 
-  if (!SUPABASE_URL || !serviceRoleKey) {
+  if (!supabaseUrl || !serviceRoleKey) {
     throw new Error("Supabase admin environment is not configured.");
   }
 
-  return createClient(SUPABASE_URL, serviceRoleKey, {
+  return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,

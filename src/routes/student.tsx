@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bus,
   Gauge,
@@ -11,6 +11,9 @@ import {
 import { getHomeRouteForRole, getSession } from "@/lib/auth";
 import { useLiveTracking } from "../hooks/use-live-tracking";
 import { useRoleNotifications } from "../hooks/use-role-notifications";
+import { useStudentLocation } from "../hooks/use-student-location";
+import { clearStudentRoute, saveStudentRoute, type StudentRouteRecord } from "../lib/student-route";
+import { getDriverTripStartLocation } from "../lib/live-tracking";
 
 export const Route = createFileRoute("/student")({
   beforeLoad: () => {
@@ -42,6 +45,19 @@ function StudentDashboard() {
   const [studentId, setStudentId] = useState("student");
   const { tracking, loading } = useLiveTracking();
   const { notifications, loading: notificationsLoading } = useRoleNotifications("student");
+  const { location: studentLocation, error: studentLocationError } = useStudentLocation({
+    enabled: true,
+    watch: false,
+  });
+  const [routeSummary, setRouteSummary] = useState<StudentRouteRecord | null>(null);
+  const [driverStartLocation, setDriverStartLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const lastFetchRef = useRef<{
+    timestamp: number;
+    driverLat: number;
+    driverLng: number;
+    studentLat: number;
+    studentLng: number;
+  } | null>(null);
 
   useEffect(() => {
     const session = getSession();
@@ -51,10 +67,195 @@ function StudentDashboard() {
 
   const isActive = tracking?.isActive ?? false;
 
+  const routeEtaText = useMemo(() => {
+    if (!routeSummary) return null;
+    const eta = Math.max(1, Math.round(routeSummary.etaMinutes));
+    return `${eta} min`;
+  }, [routeSummary]);
+
   /* format ISO timestamp to relative string */
   const lastUpdated = tracking?.updatedAt
     ? formatRelativeTime(tracking.updatedAt)
     : null;
+
+  useEffect(() => {
+    const driverUserId = tracking?.driverUserId;
+
+    if (!tracking?.isActive || !driverUserId) {
+      setDriverStartLocation(null);
+      return;
+    }
+
+    const activeDriverUserId = driverUserId;
+
+    const key = `pulseride.driverStart.${activeDriverUserId}.${tracking.startedAt ?? "active"}`;
+    const cached = window.localStorage.getItem(key);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as { lat?: number; lng?: number };
+        if (typeof parsed.lat === "number" && typeof parsed.lng === "number") {
+          setDriverStartLocation({ lat: parsed.lat, lng: parsed.lng });
+        }
+      } catch {
+        // Ignore invalid cache and continue with remote lookup.
+      }
+    }
+
+    let isMounted = true;
+
+    const loadStartLocation = async () => {
+      const remoteStart = await getDriverTripStartLocation(activeDriverUserId);
+      if (!isMounted) return;
+
+      const next = remoteStart
+        ? { lat: remoteStart.latitude, lng: remoteStart.longitude }
+        : { lat: tracking.latitude, lng: tracking.longitude };
+
+      setDriverStartLocation(next);
+      window.localStorage.setItem(key, JSON.stringify(next));
+    };
+
+    void loadStartLocation();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [tracking?.driverUserId, tracking?.isActive, tracking?.startedAt]);
+
+  useEffect(() => {
+    if (!tracking?.isActive || !studentLocation) {
+      setRouteSummary(null);
+      clearStudentRoute();
+      return;
+    }
+
+    const previous = lastFetchRef.current;
+    const now = Date.now();
+    const movedDriverMeters = previous
+      ? haversineKm(previous.driverLat, previous.driverLng, tracking.latitude, tracking.longitude) * 1000
+      : Number.POSITIVE_INFINITY;
+    const movedStudentMeters = previous
+      ? haversineKm(
+          previous.studentLat,
+          previous.studentLng,
+          studentLocation.latitude,
+          studentLocation.longitude,
+        ) * 1000
+      : Number.POSITIVE_INFINITY;
+    const shouldRefetch =
+      !previous || now - previous.timestamp > 5000 || movedDriverMeters > 8 || movedStudentMeters > 8;
+
+    if (!shouldRefetch) return;
+
+    lastFetchRef.current = {
+      timestamp: now,
+      driverLat: tracking.latitude,
+      driverLng: tracking.longitude,
+      studentLat: studentLocation.latitude,
+      studentLng: studentLocation.longitude,
+    };
+
+    const controller = new AbortController();
+    let isMounted = true;
+
+    const saveFallbackRoute = () => {
+      const linearDistanceKm = haversineKm(
+        tracking.latitude,
+        tracking.longitude,
+        studentLocation.latitude,
+        studentLocation.longitude,
+      );
+      const assumedSpeed = Math.max(tracking.speedKmh, 18);
+      const durationMin = (linearDistanceKm / assumedSpeed) * 60;
+
+      const fallback: StudentRouteRecord = {
+        driverLatitude: tracking.latitude,
+        driverLongitude: tracking.longitude,
+        studentLatitude: studentLocation.latitude,
+        studentLongitude: studentLocation.longitude,
+        driverStartLatitude: driverStartLocation?.lat ?? null,
+        driverStartLongitude: driverStartLocation?.lng ?? null,
+        distanceKm: linearDistanceKm,
+        durationMin,
+        etaMinutes: Math.max(1, durationMin),
+        path: [
+          [tracking.latitude, tracking.longitude],
+          [studentLocation.latitude, studentLocation.longitude],
+        ],
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (!isMounted) return;
+      setRouteSummary(fallback);
+      saveStudentRoute(fallback);
+    };
+
+    const fetchRoute = async () => {
+      try {
+        const url =
+          `https://router.project-osrm.org/route/v1/driving/` +
+          `${tracking.longitude},${tracking.latitude};${studentLocation.longitude},${studentLocation.latitude}` +
+          `?overview=full&geometries=geojson`;
+
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) {
+          saveFallbackRoute();
+          return;
+        }
+
+        const data = (await response.json()) as {
+          routes?: Array<{
+            distance: number;
+            duration: number;
+            geometry: { coordinates: Array<[number, number]> };
+          }>;
+        };
+
+        const route = data.routes?.[0];
+        if (!route) {
+          saveFallbackRoute();
+          return;
+        }
+
+        const next: StudentRouteRecord = {
+          driverLatitude: tracking.latitude,
+          driverLongitude: tracking.longitude,
+          studentLatitude: studentLocation.latitude,
+          studentLongitude: studentLocation.longitude,
+          driverStartLatitude: driverStartLocation?.lat ?? null,
+          driverStartLongitude: driverStartLocation?.lng ?? null,
+          distanceKm: route.distance / 1000,
+          durationMin: route.duration / 60,
+          etaMinutes: Math.max(1, route.duration / 60),
+          path: route.geometry.coordinates.map(([lon, lat]) => [lat, lon]),
+          updatedAt: new Date().toISOString(),
+        };
+
+        if (!isMounted) return;
+        setRouteSummary(next);
+        saveStudentRoute(next);
+      } catch {
+        if (controller.signal.aborted) return;
+        saveFallbackRoute();
+      }
+    };
+
+    void fetchRoute();
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, [
+    tracking?.isActive,
+    tracking?.latitude,
+    tracking?.longitude,
+    tracking?.speedKmh,
+    studentLocation?.latitude,
+    studentLocation?.longitude,
+    driverStartLocation?.lat,
+    driverStartLocation?.lng,
+  ]);
 
   return (
     <div className="h-full lg:h-[calc(100vh-4rem)] overflow-y-auto">
@@ -94,6 +295,25 @@ function StudentDashboard() {
                       ? "Driver is sharing live location"
                       : "Waiting for driver to start a trip"}
                   </p>
+
+                  {isActive && studentLocation && routeSummary ? (
+                    <div className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+                      <p>
+                        Driver start: {formatLatLng(
+                          routeSummary.driverStartLatitude ?? tracking?.latitude ?? 0,
+                          routeSummary.driverStartLongitude ?? tracking?.longitude ?? 0,
+                        )}
+                      </p>
+                      <p>Your location: {formatLatLng(studentLocation.latitude, studentLocation.longitude)}</p>
+                      <p>
+                        Route to you: {routeSummary.distanceKm.toFixed(2)} km · ETA {routeEtaText}
+                      </p>
+                    </div>
+                  ) : isActive && studentLocationError ? (
+                    <p className="mt-2 text-xs text-warning">
+                      Enable location access to get precise route ETA.
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -224,6 +444,21 @@ function StudentDashboard() {
       </div>
     </div>
   );
+}
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatLatLng(lat: number, lng: number): string {
+  return `${lat.toFixed(5)}°, ${lng.toFixed(5)}°`;
 }
 
 /* ------------------------------------------------------------------ */

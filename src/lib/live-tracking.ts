@@ -43,6 +43,18 @@ interface AssignedBusRow {
   bus_number: string;
 }
 
+interface TripStartRow {
+  latitude: number | null;
+  longitude: number | null;
+  created_at: string;
+}
+
+export interface TripStartLocation {
+  latitude: number;
+  longitude: number;
+  createdAt: string;
+}
+
 function isValidNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -145,7 +157,26 @@ async function logOperationEvent(
     busNumber = assignedBus.bus_number;
   }
 
-  const { error } = await supabase.from("operation_events").insert({
+  const eventPayload = {
+    event_type: eventType,
+    driver_user_id: userId,
+    driver_name: driverName,
+    bus_id: busId,
+    bus_number: busNumber,
+    distance_km: record.distanceKm,
+    speed_kmh: record.speedKmh,
+    latitude: record.latitude,
+    longitude: record.longitude,
+  };
+
+  const { error } = await supabase.from("operation_events").insert(eventPayload);
+
+  if (!error) {
+    return;
+  }
+
+  // Backward-compatible insert path when latitude/longitude columns are not present yet.
+  const { error: fallbackError } = await supabase.from("operation_events").insert({
     event_type: eventType,
     driver_user_id: userId,
     driver_name: driverName,
@@ -155,8 +186,8 @@ async function logOperationEvent(
     speed_kmh: record.speedKmh,
   });
 
-  if (error) {
-    console.warn("Failed to log operation event:", error.message);
+  if (fallbackError) {
+    console.warn("Failed to log operation event:", fallbackError.message);
   }
 }
 
@@ -209,6 +240,30 @@ export async function getLatestDriverTracking(): Promise<LiveTrackingRecord | nu
   }
 
   return cached;
+}
+
+export async function getDriverTripStartLocation(driverUserId: string): Promise<TripStartLocation | null> {
+  try {
+    const { data, error } = await supabase
+      .from("operation_events")
+      .select("latitude, longitude, created_at")
+      .eq("event_type", "trip_started")
+      .eq("driver_user_id", driverUserId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<TripStartRow>();
+
+    if (error || !data) return null;
+    if (!isValidNumber(data.latitude) || !isValidNumber(data.longitude)) return null;
+
+    return {
+      latitude: data.latitude,
+      longitude: data.longitude,
+      createdAt: data.created_at,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function saveDriverTracking(input: SaveDriverTrackingInput): Promise<void> {

@@ -7,7 +7,7 @@ export function AppToaster(props: ToasterProps) {
       toastOptions={{
         classNames: {
           toast:
-            "glass !rounded-2xl !border !border-border/60 !shadow-elegant !text-foreground !font-sans",
+            "glass !rounded-2xl !border !bg-black/50 !bg-opacity-30 !border-border/60 !shadow-elegant !text-foreground !font-sans",
           title: "!font-semibold",
           description: "!text-muted-foreground",
         },

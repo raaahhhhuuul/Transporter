@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import "leaflet/dist/leaflet.css";
 import { useLiveTracking } from "@/hooks/use-live-tracking";
+import { useStudentLocation } from "@/hooks/use-student-location";
+import { useStudentRouteFeed } from "@/hooks/use-student-route-feed";
+import { getSession } from "@/lib/auth";
 
 type ReactLeafletModule = typeof import("react-leaflet");
 type LeafletModule = typeof import("leaflet");
@@ -13,6 +16,13 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
   const [reactLeaflet, setReactLeaflet] = useState<ReactLeafletModule | null>(null);
   const [leafletModule, setLeafletModule] = useState<LeafletModule | null>(null);
   const { tracking } = useLiveTracking(3000);
+  const session = getSession();
+  const isStudentView = session?.role === "student";
+  const { location: studentLocation } = useStudentLocation({
+    enabled: isStudentView,
+    watch: isStudentView,
+  });
+  const { route } = useStudentRouteFeed();
 
   useEffect(() => {
     let isMounted = true;
@@ -70,6 +80,19 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
     });
   }, [leafletModule]);
 
+  const studentIcon = useMemo(() => {
+    if (!leafletModule) return null;
+
+    return leafletModule.divIcon({
+      className: "",
+      html:
+        "<div style='position:relative;width:14px;height:14px;border-radius:9999px;background:#d7c2c2;border:2px solid rgba(80,46,46,.9);box-shadow:0 0 0 4px rgba(126,86,86,.2);'></div>",
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+      popupAnchor: [0, -10],
+    });
+  }, [leafletModule]);
+
   if (!leafletReady || !reactLeaflet) {
     return (
       <div className={mapContainerClasses}>
@@ -80,11 +103,19 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
     );
   }
 
-  const { MapContainer, Marker, Popup, TileLayer, ZoomControl, useMap } = reactLeaflet;
+  const { MapContainer, Marker, Polyline, Popup, TileLayer, ZoomControl, useMap } = reactLeaflet;
   const markerPosition: [number, number] = tracking
     ? [tracking.latitude, tracking.longitude]
     : BUS_MARKER;
-  const mapCenter: [number, number] = tracking?.isActive ? markerPosition : CHENNAI_CENTER;
+  const studentPosition: [number, number] | null =
+    studentLocation ? [studentLocation.latitude, studentLocation.longitude] : null;
+  const routePath = isStudentView ? route?.path ?? [] : [];
+  const mapCenter: [number, number] =
+    isStudentView && studentPosition
+      ? studentPosition
+      : tracking?.isActive
+        ? markerPosition
+        : CHENNAI_CENTER;
 
   function FollowLiveBus({ position, active }: { position: [number, number]; active: boolean }) {
     const map = useMap();
@@ -93,6 +124,23 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
       if (!active) return;
       map.panTo(position, { animate: true, duration: 0.8 });
     }, [active, map, position]);
+
+    return null;
+  }
+
+  function FocusStudentRoute({
+    path,
+    active,
+  }: {
+    path: Array<[number, number]>;
+    active: boolean;
+  }) {
+    const map = useMap();
+
+    useEffect(() => {
+      if (!active || path.length < 2) return;
+      map.fitBounds(path, { padding: [36, 36], maxZoom: 14, animate: true });
+    }, [active, map, path]);
 
     return null;
   }
@@ -110,7 +158,13 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; CARTO'
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
+        {isStudentView && routePath.length > 1 ? (
+          <Polyline positions={routePath} pathOptions={{ color: "#8f4b4b", weight: 4, opacity: 0.9 }} />
+        ) : null}
         <FollowLiveBus position={markerPosition} active={Boolean(tracking?.isActive)} />
+        {isStudentView ? (
+          <FocusStudentRoute path={routePath} active={Boolean(tracking?.isActive)} />
+        ) : null}
         <ZoomControl position="bottomright" />
         <Marker position={markerPosition} icon={busIcon ?? undefined}>
           <Popup>
@@ -122,6 +176,17 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
             </div>
           </Popup>
         </Marker>
+        {isStudentView && studentPosition ? (
+          <Marker position={studentPosition} icon={studentIcon ?? undefined}>
+            <Popup>
+              <div className="space-y-0.5 text-xs">
+                <p className="font-semibold">Your Location</p>
+                <p>Lat: {studentPosition[0].toFixed(5)}</p>
+                <p>Lng: {studentPosition[1].toFixed(5)}</p>
+              </div>
+            </Popup>
+          </Marker>
+        ) : null}
       </MapContainer>
       <div className="pointer-events-none absolute left-2 top-2 rounded-md bg-background/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-foreground">
         Chennai Live Transit Map

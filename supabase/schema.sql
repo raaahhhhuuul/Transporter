@@ -73,10 +73,18 @@ create table if not exists public.operation_events (
   driver_name text not null,
   bus_id uuid references public.buses(id) on delete set null,
   bus_number text,
+  latitude double precision,
+  longitude double precision,
   distance_km double precision not null default 0,
   speed_kmh double precision not null default 0,
   created_at timestamptz not null default now()
 );
+
+alter table public.operation_events
+  add column if not exists latitude double precision;
+
+alter table public.operation_events
+  add column if not exists longitude double precision;
 
 create table if not exists public.admin_notifications (
   id uuid primary key default gen_random_uuid(),

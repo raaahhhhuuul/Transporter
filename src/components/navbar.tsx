@@ -1,8 +1,16 @@
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { Bus, User, LogOut } from "lucide-react";
+import { Bus, User, LogOut, LayoutDashboard } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { clearSession, getHomeRouteForRole, getSession, type AuthSession } from "../lib/auth";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 
 function roleLabel(role: AuthSession["role"]) {
   if (role === "student") return "Student";
@@ -39,7 +47,7 @@ export function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-border/60 bg-background/70 backdrop-blur-xl">
+    <header className="sticky top-0 z-1200 w-full border-b border-border/60 bg-background/70 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
         <Link to={mainRoute} className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl gradient-primary shadow-glow">
@@ -56,17 +64,6 @@ export function Navbar() {
         {!isAuthPage && (
           <nav className="hidden items-center gap-1 md:flex">
             {session && <NavItem to={mainRoute} label={`${roleLabel(session.role)} Portal`} />}
-            {session && (
-              <button
-                type="button"
-                onClick={() => {
-                  void handleLogout();
-                }}
-                className="inline-flex items-center gap-1 rounded-full px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              >
-                <LogOut className="h-4 w-4" /> Logout
-              </button>
-            )}
           </nav>
         )}
 
@@ -80,14 +77,55 @@ export function Navbar() {
               <span className="text-xs font-medium text-foreground">Live</span>
             </div>
           )}
-          <button
-            type="button"
-            className="flex h-9 min-w-9 items-center justify-center rounded-full border border-border bg-surface px-2.5 text-xs font-bold transition-colors hover:bg-secondary"
-            aria-label="Profile"
-            title={session ? `${roleLabel(session.role)} account` : "Guest"}
-          >
-            {session ? userInitial : <User className="h-4 w-4" />}
-          </button>
+          {session ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-9 min-w-9 items-center justify-center rounded-full border border-border bg-surface px-2.5 text-xs font-bold transition-colors hover:bg-secondary"
+                  aria-label="Profile"
+                  title={`${roleLabel(session.role)} account`}
+                >
+                  {userInitial}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="z-1300 w-56 border-border bg-card">
+                <DropdownMenuLabel>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {roleLabel(session.role)} Account
+                  </p>
+                  <p className="mt-1 text-xs font-normal text-muted-foreground">{session.email}</p>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {!isAuthPage ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      navigate({ to: mainRoute });
+                    }}
+                  >
+                    <LayoutDashboard className="h-4 w-4" /> Open Portal
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuItem
+                  onSelect={() => {
+                    void handleLogout();
+                  }}
+                  className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+                >
+                  <LogOut className="h-4 w-4" /> Logout
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <button
+              type="button"
+              className="flex h-9 min-w-9 items-center justify-center rounded-full border border-border bg-surface px-2.5 text-xs font-bold transition-colors hover:bg-secondary"
+              aria-label="Profile"
+              title="Guest"
+            >
+              <User className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
     </header>

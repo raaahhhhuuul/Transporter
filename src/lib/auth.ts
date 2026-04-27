@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 
 import { supabase } from "@/lib/supabase";
+import { getServerSupabaseConfig } from "@/lib/server-env";
 
 export type UserRole = "student" | "driver" | "admin";
 export type RegistrableRole = "student" | "driver";
@@ -95,8 +96,6 @@ interface LoginApprovalRow {
 
 const SESSION_KEY = "pulseride.session.v1";
 const ADMIN_LOGIN_ID = "transporter@admin.com";
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-
 const roleHomePath: Record<UserRole, "/student" | "/driver" | "/admin"> = {
   student: "/student",
   driver: "/driver",
@@ -140,13 +139,13 @@ function createMockJwt(payload: Record<string, unknown>) {
 }
 
 function getAdminSupabaseClient() {
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { supabaseUrl, serviceRoleKey } = getServerSupabaseConfig();
 
-  if (!serviceRoleKey) {
-    throw new Error("Missing Supabase service role key");
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error("Missing server Supabase env. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
   }
 
-  return createClient(SUPABASE_URL, serviceRoleKey, {
+  return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
