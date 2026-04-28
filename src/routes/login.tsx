@@ -1,43 +1,24 @@
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Bus, Mail, Lock, Eye, EyeOff, AlertCircle, Loader2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import { getHomeRouteForRole, getSession, signIn } from "../lib/auth";
+import { getHomeRouteForRole, getSession, signIn } from "@/lib/auth";
 
-export const Route = createFileRoute("/login")({
-  beforeLoad: () => {
-    if (typeof window === "undefined") return;
-
-    const session = getSession();
-    if (session) {
-      throw redirect({ to: getHomeRouteForRole(session.role) });
-    }
-  },
-  head: () => ({
-    meta: [
-      { title: "Sign In - PulseRide" },
-      {
-        name: "description",
-        content: "Sign in to continue to your PulseRide dashboard.",
-      },
-      { property: "og:title", content: "Sign In - PulseRide" },
-      {
-        property: "og:description",
-        content: "Sign in to continue to your PulseRide dashboard.",
-      },
-    ],
-  }),
-  component: LoginPage,
-});
-
-function LoginPage() {
+export function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+
+  useEffect(() => {
+    const session = getSession();
+    if (session) {
+      navigate(getHomeRouteForRole(session.role), { replace: true });
+    }
+  }, [navigate]);
 
   const validate = () => {
     const nextErrors: typeof errors = {};
@@ -65,7 +46,7 @@ function LoginPage() {
               ? "Admin token generated and session started."
               : "Welcome back.",
         });
-        navigate({ to: homeRoute });
+        navigate(homeRoute);
       } catch (error) {
         setLoading(false);
         toast.error("Unable to sign in", {
@@ -94,7 +75,7 @@ function LoginPage() {
             <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl gradient-primary shadow-glow">
               <Bus className="h-7 w-7 text-primary-foreground" strokeWidth={2.5} />
             </div>
-            <h1 className="font-display text-2xl font-bold tracking-tight">Login to PulseRide</h1>
+            <h1 className="font-display text-2xl font-bold tracking-tight">Login to Transporter</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Enter your credentials to continue.
             </p>
@@ -157,7 +138,7 @@ function LoginPage() {
               Don&apos;t have an account?{" "}
               <button
                 type="button"
-                onClick={() => navigate({ to: "/signup" })}
+                onClick={() => navigate("/signup")}
                 className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
               >
                 <UserPlus className="h-4 w-4" /> Sign up

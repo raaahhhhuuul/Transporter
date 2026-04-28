@@ -1,6 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
-import { createClient } from "@supabase/supabase-js";
-import { getServerSupabaseConfig } from "@/lib/server-env";
+import { supabase } from "@/lib/supabase";
 import { isMissingSupabaseTableError } from "@/lib/supabase-errors";
 
 export type BusStatus = "active" | "inactive" | "maintenance";
@@ -47,6 +45,15 @@ export interface AdminNotification {
   createdAt: string;
 }
 
+export interface ActiveTripAdminItem {
+  driverUserId: string;
+  driverName: string;
+  busNumber: string | null;
+  distanceKm: number;
+  speedKmh: number;
+  createdAt: string;
+}
+
 interface BusRow {
   id: string;
   bus_number: string;
@@ -85,67 +92,109 @@ interface NotificationRow {
   created_at: string;
 }
 
-function getAdminSupabaseClient() {
-  const { supabaseUrl, serviceRoleKey } = getServerSupabaseConfig();
+const LOCAL_BUSES_KEY = "transporter.admin.buses.v1";
+const LOCAL_NOTIFICATIONS_KEY = "transporter.admin.notifications.v1";
 
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error("Supabase admin environment is not configured.");
+function isBrowser() {
+  return typeof window !== "undefined";
+}
+
+function readLocalJson<T>(key: string, fallback: T): T {
+  if (!isBrowser()) return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
   }
+}
 
-  return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
+function writeLocalJson<T>(key: string, value: T) {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(key, JSON.stringify(value));
+}
+
+function toAdminNotification(row: NotificationRow): AdminNotification {
+  return {
+    id: row.id,
+    title: row.title,
+    message: row.message,
+    targetRole: row.target_role,
+    createdAt: row.created_at,
+  };
+}
+
+function normalizeNotification(input: AdminNotification): AdminNotification {
+  return {
+    id: input.id,
+    title: input.title,
+    message: input.message,
+    targetRole: input.targetRole,
+    createdAt: input.createdAt,
+  };
+}
+
+function getLocalNotifications(): AdminNotification[] {
+  return readLocalJson<AdminNotification[]>(LOCAL_NOTIFICATIONS_KEY, []).map(normalizeNotification);
+}
+
+function saveLocalNotifications(notifications: AdminNotification[]) {
+  writeLocalJson(LOCAL_NOTIFICATIONS_KEY, notifications);
+}
+
+function getLocalBuses(): AdminBus[] {
+  return readLocalJson<AdminBus[]>(LOCAL_BUSES_KEY, []);
+}
+
+function saveLocalBuses(buses: AdminBus[]) {
+  writeLocalJson(LOCAL_BUSES_KEY, buses);
+}
+
+function buildSeedBuses(count = 48): AdminBus[] {
+  const routes = [
+    "SRM Main Gate",
+    "Potheri Station",
+    "Guduvanchery",
+    "Tambaram",
+    "Chromepet",
+    "Velachery",
+    "Madhya Kailash",
+    "Sholinganallur",
+  ];
+
+  return Array.from({ length: count }, (_, index) => {
+    const number = index + 1;
+    return {
+      id: crypto.randomUUID(),
+      busNumber: `BUS-${String(number).padStart(3, "0")}`,
+      routeName: routes[index % routes.length],
+      plate: `TN-${String(10 + (index % 20)).padStart(2, "0")}-AB-${String(2000 + number)}`,
+      status: "inactive",
+      assignedDriverUserId: null,
+      assignedDriverName: null,
+      assignedDriverLoginId: null,
+      updatedAt: new Date().toISOString(),
+    };
   });
 }
 
-const getBusesServerFn = createServerFn({ method: "GET" }).handler(async () => {
-  const adminSupabase = getAdminSupabaseClient();
-
-  const { data: buses, error: busError } = await adminSupabase
-    .from("buses")
-    .select("id, bus_number, route_name, plate, status, assigned_driver_user_id, updated_at")
-    .order("bus_number", { ascending: true });
-
-  if (busError) {
-    if (isMissingSupabaseTableError(busError)) return [];
-    throw new Error(busError.message);
-  }
-
-  const busRows = (buses ?? []) as BusRow[];
-  const assignedDriverIds = Array.from(
-    new Set(
-      busRows
-        .map((bus) => bus.assigned_driver_user_id)
-        .filter((id): id is string => typeof id === "string" && id.length > 0),
-    ),
-  );
-
-  let driverMap = new Map<string, Pick<DriverRow, "name" | "login_id">>();
-
-  if (assignedDriverIds.length > 0) {
-    const { data: drivers, error: driversError } = await adminSupabase
-      .from("drivers")
-      .select("user_id, name, login_id")
-      .in("user_id", assignedDriverIds);
-
-    if (driversError) {
-      if (isMissingSupabaseTableError(driversError)) return [];
-      throw new Error(driversError.message);
-    }
-
-    driverMap = new Map(
-      ((drivers ?? []) as Array<Pick<DriverRow, "user_id" | "name" | "login_id">>).map((driver) => [
-        driver.user_id,
-        { name: driver.name, login_id: driver.login_id },
-      ]),
-    );
-  }
-
-  return busRows.map((bus) => {
+function applyDriverAssignments(
+  buses: Array<{
+    id: string;
+    bus_number: string;
+    route_name: string;
+    plate: string;
+    status: BusStatus;
+    assigned_driver_user_id: string | null;
+    updated_at: string;
+  }>,
+  drivers: Map<string, Pick<DriverRow, "name" | "login_id">>,
+  activeBusNumbers: Set<string>,
+): AdminBus[] {
+  return buses.map((bus) => {
     const assignedDriver = bus.assigned_driver_user_id
-      ? driverMap.get(bus.assigned_driver_user_id)
+      ? drivers.get(bus.assigned_driver_user_id)
       : null;
 
     return {
@@ -153,24 +202,123 @@ const getBusesServerFn = createServerFn({ method: "GET" }).handler(async () => {
       busNumber: bus.bus_number,
       routeName: bus.route_name,
       plate: bus.plate,
-      status: bus.status,
+      status: activeBusNumbers.has(bus.bus_number) ? "active" : bus.status,
       assignedDriverUserId: bus.assigned_driver_user_id,
       assignedDriverName: assignedDriver?.name ?? null,
       assignedDriverLoginId: assignedDriver?.login_id ?? null,
       updatedAt: bus.updated_at,
     } satisfies AdminBus;
   });
-});
+}
 
-const getApprovedDriversServerFn = createServerFn({ method: "GET" }).handler(async () => {
-  const adminSupabase = getAdminSupabaseClient();
+async function getDriverMap(driverIds: string[]) {
+  if (driverIds.length === 0) {
+    return new Map<string, Pick<DriverRow, "name" | "login_id">>();
+  }
 
-  const { data, error } = await adminSupabase
+  const { data: drivers, error } = await supabase
+    .from("drivers")
+    .select("user_id, name, login_id")
+    .in("user_id", driverIds);
+
+  if (error) {
+    if (isMissingSupabaseTableError(error)) {
+      return new Map<string, Pick<DriverRow, "name" | "login_id">>();
+    }
+    throw new Error(error.message);
+  }
+
+  return new Map(
+    ((drivers ?? []) as Array<Pick<DriverRow, "user_id" | "name" | "login_id">>).map((driver) => [
+      driver.user_id,
+      { name: driver.name, login_id: driver.login_id },
+    ]),
+  );
+}
+
+export async function getBuses() {
+  const activeTrips = await getActiveTrips().catch(() => []);
+  const activeBusNumbers = new Set(activeTrips.map((trip) => trip.busNumber).filter(Boolean) as string[]);
+
+  const { data: buses, error: busError } = await supabase
+    .from("buses")
+    .select("id, bus_number, route_name, plate, status, assigned_driver_user_id, updated_at")
+    .order("bus_number", { ascending: true });
+
+  if (busError) {
+    if (isMissingSupabaseTableError(busError)) {
+      const localBuses = getLocalBuses();
+      const driverMap = await getDriverMap(
+        Array.from(
+          new Set(
+            localBuses
+              .map((bus) => bus.assignedDriverUserId)
+              .filter((id): id is string => typeof id === "string" && id.length > 0),
+          ),
+        ),
+      );
+      return localBuses.map((bus) => {
+        const assignedDriver = bus.assignedDriverUserId
+          ? driverMap.get(bus.assignedDriverUserId)
+          : null;
+
+        return {
+          ...bus,
+          status: activeBusNumbers.has(bus.busNumber) ? "active" : bus.status,
+          assignedDriverName: assignedDriver?.name ?? bus.assignedDriverName ?? null,
+          assignedDriverLoginId: assignedDriver?.login_id ?? bus.assignedDriverLoginId ?? null,
+        };
+      });
+    }
+    throw new Error(busError.message);
+  }
+
+  const busRows = (buses ?? []) as BusRow[];
+  const driverMap = await getDriverMap(
+    Array.from(
+      new Set(
+        busRows
+          .map((bus) => bus.assigned_driver_user_id)
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    ),
+  );
+
+  return applyDriverAssignments(busRows, driverMap, activeBusNumbers);
+}
+
+export async function seedDefaultBuses(count = 48) {
+  const fallbackBuses = buildSeedBuses(count);
+  saveLocalBuses(fallbackBuses);
+
+  const rows = fallbackBuses.map((bus) => ({
+    id: bus.id,
+    bus_number: bus.busNumber,
+    route_name: bus.routeName,
+    plate: bus.plate,
+    status: bus.status,
+    assigned_driver_user_id: null,
+    updated_at: bus.updatedAt,
+  }));
+
+  const { error } = await supabase.from("buses").upsert(rows, { onConflict: "id" });
+  if (error && !isMissingSupabaseTableError(error)) {
+    throw new Error(error.message);
+  }
+
+  return { ok: true, count: fallbackBuses.length };
+}
+
+export async function getApprovedDrivers() {
+  const { data, error } = await supabase
     .from("drivers")
     .select("user_id, name, login_id, phone_number, created_at")
     .order("name", { ascending: true });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingSupabaseTableError(error)) return [];
+    throw new Error(error.message);
+  }
 
   return ((data ?? []) as DriverRow[]).map(
     (driver) =>
@@ -182,50 +330,102 @@ const getApprovedDriversServerFn = createServerFn({ method: "GET" }).handler(asy
         createdAt: driver.created_at,
       }) satisfies ApprovedDriver,
   );
-});
+}
 
-const assignDriverToBusServerFn = createServerFn({ method: "POST" })
-  .inputValidator((data: { busId: string; driverUserId: string | null }) => data)
-  .handler(async ({ data }) => {
-    const adminSupabase = getAdminSupabaseClient();
+export async function assignDriverToBus(busId: string, driverUserId: string | null) {
+  if (!busId) throw new Error("Bus ID is required.");
 
-    if (!data.busId) throw new Error("Bus ID is required.");
-
-    const nowIso = new Date().toISOString();
-
-    if (data.driverUserId) {
-      const { error: clearExistingError } = await adminSupabase
-        .from("buses")
-        .update({ assigned_driver_user_id: null, updated_at: nowIso })
-        .eq("assigned_driver_user_id", data.driverUserId)
-        .neq("id", data.busId);
-
-      if (clearExistingError) {
-        if (isMissingSupabaseTableError(clearExistingError)) return { ok: false };
-        throw new Error(clearExistingError.message);
+  const nowIso = new Date().toISOString();
+  const localBuses = getLocalBuses();
+  if (localBuses.length > 0) {
+    const updatedLocal = localBuses.map((bus) => {
+      if (driverUserId && bus.assignedDriverUserId === driverUserId && bus.id !== busId) {
+        return {
+          ...bus,
+          assignedDriverUserId: null,
+          assignedDriverName: null,
+          assignedDriverLoginId: null,
+          updatedAt: nowIso,
+        };
       }
-    }
+      if (bus.id !== busId) return bus;
+      return {
+        ...bus,
+        assignedDriverUserId: driverUserId,
+        assignedDriverName: null,
+        assignedDriverLoginId: null,
+        updatedAt: nowIso,
+      };
+    });
+    saveLocalBuses(updatedLocal);
+  }
 
-    const { error } = await adminSupabase
+  if (driverUserId) {
+    const { error: clearExistingError } = await supabase
       .from("buses")
-      .update({
-        assigned_driver_user_id: data.driverUserId,
-        updated_at: nowIso,
-      })
-      .eq("id", data.busId);
+      .update({ assigned_driver_user_id: null, updated_at: nowIso })
+      .eq("assigned_driver_user_id", driverUserId)
+      .neq("id", busId);
 
-    if (error) {
-      if (isMissingSupabaseTableError(error)) return { ok: false };
-      throw new Error(error.message);
+    if (clearExistingError && !isMissingSupabaseTableError(clearExistingError)) {
+      throw new Error(clearExistingError.message);
     }
+  }
 
-    return { ok: true };
-  });
+  const { error } = await supabase
+    .from("buses")
+    .update({
+      assigned_driver_user_id: driverUserId,
+      updated_at: nowIso,
+    })
+    .eq("id", busId);
 
-const getOperationQueueServerFn = createServerFn({ method: "GET" }).handler(async () => {
-  const adminSupabase = getAdminSupabaseClient();
+  if (error && !isMissingSupabaseTableError(error)) {
+    throw new Error(error.message);
+  }
 
-  const { data, error } = await adminSupabase
+  return { ok: true };
+}
+
+export async function getAssignedBusForDriver(driverUserId: string) {
+  if (!driverUserId) return null;
+
+  const { data, error } = await supabase
+    .from("buses")
+    .select("id, bus_number, route_name, plate, status, assigned_driver_user_id, updated_at")
+    .eq("assigned_driver_user_id", driverUserId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<BusRow>();
+
+  if (error) {
+    if (isMissingSupabaseTableError(error)) {
+      const local = getLocalBuses().find((bus) => bus.assignedDriverUserId === driverUserId) ?? null;
+      return local;
+    }
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    const local = getLocalBuses().find((bus) => bus.assignedDriverUserId === driverUserId) ?? null;
+    return local;
+  }
+
+  return {
+    id: data.id,
+    busNumber: data.bus_number,
+    routeName: data.route_name,
+    plate: data.plate,
+    status: data.status,
+    assignedDriverUserId: data.assigned_driver_user_id,
+    assignedDriverName: null,
+    assignedDriverLoginId: null,
+    updatedAt: data.updated_at,
+  } satisfies AdminBus;
+}
+
+export async function getOperationQueue() {
+  const { data, error } = await supabase
     .from("operation_events")
     .select(
       "id, event_type, driver_user_id, driver_name, bus_id, bus_number, distance_km, speed_kmh, created_at",
@@ -252,80 +452,50 @@ const getOperationQueueServerFn = createServerFn({ method: "GET" }).handler(asyn
         createdAt: row.created_at,
       }) satisfies OperationQueueItem,
   );
-});
+}
 
-const getAdminNotificationsServerFn = createServerFn({ method: "GET" }).handler(async () => {
-  const adminSupabase = getAdminSupabaseClient();
+export async function getActiveTrips(): Promise<ActiveTripAdminItem[]> {
+  const queue = await getOperationQueue();
+  const latestByDriver = new Map<string, OperationQueueItem>();
 
-  const { data, error } = await adminSupabase
+  for (const item of queue) {
+    if (!latestByDriver.has(item.driverUserId)) {
+      latestByDriver.set(item.driverUserId, item);
+    }
+  }
+
+  return Array.from(latestByDriver.values())
+    .filter((item) => item.eventType === "trip_started")
+    .map((item) => ({
+      driverUserId: item.driverUserId,
+      driverName: item.driverName,
+      busNumber: item.busNumber,
+      distanceKm: item.distanceKm,
+      speedKmh: item.speedKmh,
+      createdAt: item.createdAt,
+    }));
+}
+
+export async function getAdminNotifications() {
+  const { data, error } = await supabase
     .from("admin_notifications")
     .select("id, title, message, target_role, created_at")
     .order("created_at", { ascending: false })
     .limit(20);
 
   if (error) {
-    if (isMissingSupabaseTableError(error)) return [];
+    if (isMissingSupabaseTableError(error)) return getLocalNotifications();
     throw new Error(error.message);
   }
 
-  return ((data ?? []) as NotificationRow[]).map(
-    (row) =>
-      ({
-        id: row.id,
-        title: row.title,
-        message: row.message,
-        targetRole: row.target_role,
-        createdAt: row.created_at,
-      }) satisfies AdminNotification,
-  );
-});
-
-const sendAdminNotificationServerFn = createServerFn({ method: "POST" })
-  .inputValidator(
-    (data: { title: string; message: string; targetRole: NotificationTargetRole }) => data,
-  )
-  .handler(async ({ data }) => {
-    const adminSupabase = getAdminSupabaseClient();
-
-    const title = data.title.trim();
-    const message = data.message.trim();
-
-    if (!title || !message) {
-      throw new Error("Title and message are required.");
-    }
-
-    const { error } = await adminSupabase.from("admin_notifications").insert({
-      title,
-      message,
-      target_role: data.targetRole,
-    });
-
-    if (error) {
-      if (isMissingSupabaseTableError(error)) return { ok: false };
-      throw new Error(error.message);
-    }
-
-    return { ok: true };
-  });
-
-export async function getBuses() {
-  return getBusesServerFn();
+  const notifications = ((data ?? []) as NotificationRow[]).map(toAdminNotification);
+  saveLocalNotifications(notifications);
+  return notifications;
 }
 
-export async function getApprovedDrivers() {
-  return getApprovedDriversServerFn();
-}
-
-export async function assignDriverToBus(busId: string, driverUserId: string | null) {
-  return assignDriverToBusServerFn({ data: { busId, driverUserId } });
-}
-
-export async function getOperationQueue() {
-  return getOperationQueueServerFn();
-}
-
-export async function getAdminNotifications() {
-  return getAdminNotificationsServerFn();
+export async function getNotificationsForRole(role: "student" | "driver") {
+  const notifications = await getAdminNotifications();
+  return notifications.filter((note) => note.targetRole === "all" || note.targetRole === role);
 }
 
 export async function sendAdminNotification(input: {
@@ -333,5 +503,32 @@ export async function sendAdminNotification(input: {
   message: string;
   targetRole: NotificationTargetRole;
 }) {
-  return sendAdminNotificationServerFn({ data: input });
+  const title = input.title.trim();
+  const message = input.message.trim();
+
+  if (!title || !message) {
+    throw new Error("Title and message are required.");
+  }
+
+  const fallbackNotification: AdminNotification = {
+    id: `local-note-${Date.now()}`,
+    title,
+    message,
+    targetRole: input.targetRole,
+    createdAt: new Date().toISOString(),
+  };
+
+  saveLocalNotifications([fallbackNotification, ...getLocalNotifications()].slice(0, 50));
+
+  const { error } = await supabase.from("admin_notifications").insert({
+    title,
+    message,
+    target_role: input.targetRole,
+  });
+
+  if (error && !isMissingSupabaseTableError(error)) {
+    throw new Error(error.message);
+  }
+
+  return { ok: true };
 }

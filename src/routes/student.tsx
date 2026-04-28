@@ -1,41 +1,17 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Bus, Gauge, Route as RouteIcon, MapPin, Clock, Radio } from "lucide-react";
 import { getHomeRouteForRole, getSession } from "@/lib/auth";
 import { useLiveTracking } from "../hooks/use-live-tracking";
 import { useRoleNotifications } from "../hooks/use-role-notifications";
 import { useStudentLocation } from "../hooks/use-student-location";
 import { clearStudentRoute, saveStudentRoute, type StudentRouteRecord } from "../lib/student-route";
-import { getDriverTripStartLocation } from "../lib/live-tracking";
+import { getActiveTripSummary, getDriverTripStartLocation, type ActiveTripSummary } from "../lib/live-tracking";
 import { haversineKm } from "@/lib/utils";
 
-export const Route = createFileRoute("/student")({
-  beforeLoad: () => {
-    if (typeof window === "undefined") return;
-
-    const session = getSession();
-    if (!session) {
-      throw redirect({ to: "/login" });
-    }
-
-    if (session.role !== "student") {
-      throw redirect({ to: getHomeRouteForRole(session.role) });
-    }
-  },
-  head: () => ({
-    meta: [
-      { title: "Student Dashboard - PulseRide" },
-      {
-        name: "description",
-        content: "View your assigned bus details, live stop activity, and notifications.",
-      },
-    ],
-  }),
-  component: StudentDashboard,
-});
-
-function StudentDashboard() {
-  const [studentId, setStudentId] = useState("student");
+export function StudentDashboard() {
+  const navigate = useNavigate();
+  const [studentName, setStudentName] = useState("Student");
   const { tracking, loading } = useLiveTracking();
   const { notifications, loading: notificationsLoading } = useRoleNotifications("student");
   const { location: studentLocation, error: studentLocationError } = useStudentLocation({
@@ -49,6 +25,7 @@ function StudentDashboard() {
     lat: number;
     lng: number;
   } | null>(null);
+  const [activeTripSummary, setActiveTripSummary] = useState<ActiveTripSummary | null>(null);
   const lastFetchRef = useRef<{
     timestamp: number;
     driverLat: number;
@@ -59,11 +36,25 @@ function StudentDashboard() {
 
   useEffect(() => {
     const session = getSession();
+    if (!session) {
+      navigate("/login", { replace: true });
+      return;
+    }
+    if (session.role !== "student") {
+      navigate(getHomeRouteForRole(session.role), { replace: true });
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    const session = getSession();
     if (!session) return;
-    setStudentId(session.email.split("@")[0] || "student");
+    setStudentName(session.displayName || session.loginId || session.email.split("@")[0] || "Student");
   }, []);
 
-  const isActive = tracking?.isActive ?? false;
+  const isTrackingActive = tracking?.isActive ?? false;
+  const isActive = isTrackingActive || Boolean(activeTripSummary);
+  const activeBusNumber = activeTripSummary?.busNumber;
+  const activeDriverName = activeTripSummary?.driverName;
 
   const routeEtaText = useMemo(() => {
     if (!routeSummary) return null;
@@ -73,11 +64,32 @@ function StudentDashboard() {
 
   /* format ISO timestamp to relative string */
   const lastUpdated = tracking?.updatedAt ? formatRelativeTime(tracking.updatedAt) : null;
+  const activeStartedAt = tracking?.startedAt ?? activeTripSummary?.startedAt ?? null;
 
   useEffect(() => {
-    const driverUserId = tracking?.driverUserId;
+    let isMounted = true;
 
-    if (!tracking?.isActive || !driverUserId) {
+    const syncTripSummary = async () => {
+      const next = await getActiveTripSummary();
+      if (!isMounted) return;
+      setActiveTripSummary(next);
+    };
+
+    void syncTripSummary();
+    const timer = window.setInterval(() => {
+      void syncTripSummary();
+    }, 5000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const driverUserId = tracking?.driverUserId ?? activeTripSummary?.driverUserId;
+
+    if (!isActive || !driverUserId) {
       setDriverStartLocation(null);
       return;
     }
@@ -105,7 +117,10 @@ function StudentDashboard() {
 
       const next = remoteStart
         ? { lat: remoteStart.latitude, lng: remoteStart.longitude }
-        : { lat: tracking.latitude, lng: tracking.longitude };
+        : {
+            lat: tracking?.latitude ?? activeTripSummary?.latitude ?? 0,
+            lng: tracking?.longitude ?? activeTripSummary?.longitude ?? 0,
+          };
 
       setDriverStartLocation(next);
       window.localStorage.setItem(key, JSON.stringify(next));
@@ -117,11 +132,14 @@ function StudentDashboard() {
       isMounted = false;
     };
   }, [
+    activeTripSummary?.driverUserId,
+    activeTripSummary?.latitude,
+    activeTripSummary?.longitude,
     tracking?.driverUserId,
-    tracking?.isActive,
     tracking?.startedAt,
     tracking?.latitude,
     tracking?.longitude,
+    isActive,
   ]);
 
   useEffect(() => {
@@ -262,7 +280,7 @@ function StudentDashboard() {
             Student dashboard
           </p>
           <h1 className="mt-1 font-display text-2xl font-bold tracking-tight sm:text-3xl">
-            Welcome, {studentId}
+            Welcome, {studentName}!
           </h1>
         </header>
 
@@ -287,10 +305,19 @@ function StudentDashboard() {
                     {isActive ? "Bus is Active" : "No Active Trip"}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {isActive
+                    {isTrackingActive
                       ? "Driver is sharing live location"
-                      : "Waiting for driver to start a trip"}
+                      : isActive
+                        ? "Trip has started. Waiting for live coordinates."
+                        : "Waiting for driver to start a trip"}
                   </p>
+
+                  {isActive && (activeBusNumber || activeDriverName) ? (
+                    <p className="mt-1 text-xs font-medium text-foreground">
+                      {activeBusNumber ? `Bus ${activeBusNumber}` : "Assigned bus active"}
+                      {activeDriverName ? ` · Driver ${activeDriverName}` : ""}
+                    </p>
+                  ) : null}
 
                   {isActive && studentLocation && routeSummary ? (
                     <div className="mt-2 space-y-0.5 text-xs text-muted-foreground">
@@ -326,7 +353,7 @@ function StudentDashboard() {
                 <p className="text-sm text-muted-foreground animate-pulse">Loading live data…</p>
               </div>
             </section>
-          ) : isActive && tracking ? (
+          ) : isTrackingActive && tracking ? (
             <section className="rounded-2xl border border-border bg-card p-4 shadow-card">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Live Tracking
@@ -358,6 +385,19 @@ function StudentDashboard() {
                 />
               </div>
             </section>
+          ) : isActive ? (
+            <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
+              <div className="flex min-h-28 flex-col items-center justify-center rounded-xl border border-success/30 bg-success/10 text-center">
+                <Bus className="h-8 w-8 text-success" />
+                <p className="mt-2 text-base font-semibold text-foreground">Trip has started.</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {activeBusNumber
+                    ? `Bus ${activeBusNumber} is active.`
+                    : "The driver has started the trip."}{" "}
+                  Live GPS stats will appear as soon as tracking syncs.
+                </p>
+              </div>
+            </section>
           ) : (
             <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
               <div className="flex min-h-28 flex-col items-center justify-center rounded-xl border border-border bg-surface text-center">
@@ -375,7 +415,7 @@ function StudentDashboard() {
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Live Activity
             </p>
-            {isActive && tracking ? (
+            {isTrackingActive && tracking ? (
               <div className="mt-3 space-y-2">
                 <ActivityRow
                   icon={<Radio className="h-3.5 w-3.5 text-success" />}
@@ -387,13 +427,32 @@ function StudentDashboard() {
                   text={`${tracking.distanceKm.toFixed(2)} km covered so far`}
                   time={lastUpdated}
                 />
-                {tracking.startedAt && (
+                {activeStartedAt && (
                   <ActivityRow
                     icon={<Clock className="h-3.5 w-3.5 text-accent" />}
-                    text={`Trip started at ${new Date(tracking.startedAt).toLocaleTimeString()}`}
+                    text={`Trip started at ${new Date(activeStartedAt).toLocaleTimeString()}`}
                     time=""
                   />
                 )}
+              </div>
+            ) : isActive ? (
+              <div className="mt-3 space-y-2">
+                <ActivityRow
+                  icon={<Radio className="h-3.5 w-3.5 text-success" />}
+                  text={
+                    activeBusNumber
+                      ? `Bus ${activeBusNumber} has started the trip`
+                      : "Driver has started the trip"
+                  }
+                  time={activeStartedAt ? formatRelativeTime(activeStartedAt) : null}
+                />
+                {activeDriverName ? (
+                  <ActivityRow
+                    icon={<Bus className="h-3.5 w-3.5 text-primary" />}
+                    text={`Driver ${activeDriverName} is on the active route`}
+                    time=""
+                  />
+                ) : null}
               </div>
             ) : (
               <p className="mt-3 text-sm text-muted-foreground">0 updates for now.</p>
@@ -425,7 +484,9 @@ function StudentDashboard() {
               <div className="mt-3 flex items-start gap-2 rounded-xl border border-success/30 bg-success/10 px-3 py-2.5">
                 <Radio className="mt-0.5 h-3.5 w-3.5 text-success shrink-0" />
                 <p className="text-xs font-medium text-success">
-                  Driver is actively sharing their live location.
+                  {isTrackingActive
+                    ? "Driver is actively sharing their live location."
+                    : "Trip is active. Live location is syncing."}
                 </p>
               </div>
             ) : (

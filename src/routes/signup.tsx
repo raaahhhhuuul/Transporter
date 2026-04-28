@@ -1,29 +1,11 @@
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Bus, Mail, Lock, UserRound, Loader2, Phone, Truck } from "lucide-react";
 import { toast } from "sonner";
-import { getSession, signUpUser, type RegistrableRole } from "../lib/auth";
+import { getSession, signUpUser, type RegistrableRole } from "@/lib/auth";
 
-export const Route = createFileRoute("/signup")({
-  beforeLoad: () => {
-    if (typeof window === "undefined") return;
-
-    const session = getSession();
-    if (session) {
-      throw redirect({ to: "/" });
-    }
-  },
-  head: () => ({
-    meta: [
-      { title: "Sign Up - PulseRide" },
-      { name: "description", content: "Create a PulseRide account." },
-    ],
-  }),
-  component: SignUpPage,
-});
-
-function SignUpPage() {
+export function SignUpPage() {
   const navigate = useNavigate();
   const [role, setRole] = useState<RegistrableRole>("student");
   const [name, setName] = useState("");
@@ -32,6 +14,13 @@ function SignUpPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const session = getSession();
+    if (session) {
+      navigate("/", { replace: true });
+    }
+  }, [navigate]);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -76,7 +65,7 @@ function SignUpPage() {
         toast.success("Signup submitted", {
           description: "Account created successfully. Approval will be requested when you login.",
         });
-        navigate({ to: "/login" });
+        navigate("/login");
       } catch (error) {
         setLoading(false);
         toast.error("Unable to sign up", {
@@ -195,7 +184,7 @@ function SignUpPage() {
             Already have an account?{" "}
             <button
               type="button"
-              onClick={() => navigate({ to: "/login" })}
+              onClick={() => navigate("/login")}
               className="font-semibold text-cyan-300 hover:text-cyan-200 hover:underline"
             >
               Login

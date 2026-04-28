@@ -1,5 +1,5 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Play,
   Square,
@@ -13,51 +13,25 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/status-badge";
-import { getHomeRouteForRole, getSession } from "../lib/auth";
+import { getHomeRouteForRole, getSession } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 import { saveDriverTracking, stopDriverTracking } from "../lib/live-tracking";
 import { useRoleNotifications } from "../hooks/use-role-notifications";
+import { getAssignedBusForDriver } from "../lib/admin-console";
 import { haversineKm } from "@/lib/utils";
-
-export const Route = createFileRoute("/driver")({
-  beforeLoad: () => {
-    if (typeof window === "undefined") return;
-
-    const session = getSession();
-    if (!session) {
-      throw redirect({ to: "/login" });
-    }
-
-    if (session.role !== "driver") {
-      throw redirect({ to: getHomeRouteForRole(session.role) });
-    }
-  },
-  head: () => ({
-    meta: [
-      { title: "Driver Console — PulseRide" },
-      {
-        name: "description",
-        content: "Start and end trips, monitor live GPS coordinates, and update bus status.",
-      },
-      { property: "og:title", content: "Driver Console — PulseRide" },
-      {
-        property: "og:description",
-        content: "Start and end trips, monitor live GPS coordinates, and update bus status.",
-      },
-    ],
-  }),
-  component: DriverPanel,
-});
 
 /* ------------------------------------------------------------------ */
 /*  Driver Panel                                                      */
 /* ------------------------------------------------------------------ */
-function DriverPanel() {
+export function DriverPanel() {
+  const navigate = useNavigate();
   const [active, setActive] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [speed, setSpeed] = useState(0);
   const [distance, setDistance] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [driverName, setDriverName] = useState("Driver");
+  const [assignedBusLabel, setAssignedBusLabel] = useState<string | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const { notifications } = useRoleNotifications("driver");
 
@@ -76,6 +50,17 @@ function DriverPanel() {
     active: false,
   });
 
+  useEffect(() => {
+    const session = getSession();
+    if (!session) {
+      navigate("/login", { replace: true });
+      return;
+    }
+    if (session.role !== "driver") {
+      navigate(getHomeRouteForRole(session.role), { replace: true });
+    }
+  }, [navigate]);
+
   /* sync refs with state so the upload interval always has fresh data */
   useEffect(() => {
     latestRef.current = {
@@ -90,7 +75,39 @@ function DriverPanel() {
   /* get driver name from session */
   useEffect(() => {
     const session = getSession();
-    if (session) setDriverName(session.email.split("@")[0] || "Driver");
+    if (session) {
+      setDriverName(session.displayName || session.loginId || session.email.split("@")[0] || "Driver");
+    }
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadAssignedBus = async () => {
+      try {
+        const {
+          data: { session: supabaseSession },
+        } = await supabase.auth.getSession();
+        const userId = supabaseSession?.user.id;
+        if (!userId) return;
+        const bus = await getAssignedBusForDriver(userId);
+        if (!isMounted) return;
+        setAssignedBusLabel(bus ? `${bus.busNumber} · ${bus.routeName}` : null);
+      } catch {
+        if (!isMounted) return;
+        setAssignedBusLabel(null);
+      }
+    };
+
+    void loadAssignedBus();
+    const timer = window.setInterval(() => {
+      void loadAssignedBus();
+    }, 10000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   /* cleanup helper */
@@ -126,7 +143,7 @@ function DriverPanel() {
     toast.loading("Acquiring GPS location…", { id: "gps-acquire" });
 
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         toast.dismiss("gps-acquire");
         const { latitude, longitude } = pos.coords;
         const initial = { lat: latitude, lng: longitude };
@@ -138,22 +155,31 @@ function DriverPanel() {
         setSpeed(0);
         setDistance(0);
         setElapsed(0);
-        setActive(true);
         startTimeRef.current = new Date().toISOString();
 
-        toast.success("Trip started", {
-          description: "Live GPS tracking is active.",
-        });
+        try {
+          /* first push to supabase */
+          await saveDriverTracking({
+            latitude,
+            longitude,
+            speedKmh: 0,
+            distanceKm: 0,
+            isActive: true,
+            startedAt: startTimeRef.current,
+          });
+        } catch (error) {
+          startTimeRef.current = null;
+          const message = error instanceof Error ? error.message : "Unable to sync live tracking.";
+          toast.error("Trip could not be started", {
+            description: message,
+          });
+          return;
+        }
 
-        /* first push to supabase */
-        saveDriverTracking({
-          latitude,
-          longitude,
-          speedKmh: 0,
-          distanceKm: 0,
-          isActive: true,
-          startedAt: startTimeRef.current,
-        }).catch(console.error);
+        setActive(true);
+        toast.success("Trip started", {
+          description: "Students can now see your live trip.",
+        });
 
         /* continuous GPS watch */
         watchIdRef.current = navigator.geolocation.watchPosition(
@@ -199,7 +225,11 @@ function DriverPanel() {
               setSpeed(Math.max(0, Math.round(gpsSpeed * 3.6)));
             }
           },
-          (err) => console.error("GPS watch error:", err),
+          () => {
+            toast.error("Live GPS update failed", {
+              description: "We could not refresh your location. Trying again automatically.",
+            });
+          },
           { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 },
         );
 
@@ -217,7 +247,7 @@ function DriverPanel() {
             distanceKm: l.distance,
             isActive: true,
             startedAt: startTimeRef.current,
-          }).catch(console.error);
+          }).catch(() => undefined);
         }, 3000);
       },
       (err) => {
@@ -234,7 +264,7 @@ function DriverPanel() {
     prevCoordsRef.current = null;
     prevTimestampRef.current = null;
     setActive(false);
-    stopDriverTracking(distance, speed).catch(console.error);
+    stopDriverTracking(distance, speed).catch(() => undefined);
     toast("Trip ended", {
       description: `Total distance: ${distance.toFixed(2)} km`,
     });
@@ -265,6 +295,9 @@ function DriverPanel() {
             <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">
               Welcome, {driverName}
             </h1>
+            {assignedBusLabel ? (
+              <p className="mt-1 text-xs font-medium text-muted-foreground">Assigned bus: {assignedBusLabel}</p>
+            ) : null}
           </div>
           <StatusBadge status={active ? "active" : "inactive"} />
         </div>

@@ -1,5 +1,5 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { BellRing, Bus, ChartColumnBig, UserRoundCog } from "lucide-react";
 import { toast } from "sonner";
 
@@ -9,51 +9,31 @@ import {
   getPendingApprovals,
   getSession,
   type PendingLoginApproval,
-} from "../lib/auth";
+} from "@/lib/auth";
 import {
   assignDriverToBus,
+  getActiveTrips,
   getAdminNotifications,
   getApprovedDrivers,
   getBuses,
   getOperationQueue,
+  seedDefaultBuses,
   sendAdminNotification,
+  type ActiveTripAdminItem,
   type AdminBus,
   type AdminNotification,
   type ApprovedDriver,
   type NotificationTargetRole,
   type OperationQueueItem,
-} from "../lib/admin-console";
+} from "@/lib/admin-console";
 
-export const Route = createFileRoute("/admin")({
-  beforeLoad: () => {
-    if (typeof window === "undefined") return;
-
-    const session = getSession();
-    if (!session) {
-      throw redirect({ to: "/login" });
-    }
-
-    if (session.role !== "admin") {
-      throw redirect({ to: getHomeRouteForRole(session.role) });
-    }
-  },
-  head: () => ({
-    meta: [
-      { title: "Admin Console - PulseRide" },
-      {
-        name: "description",
-        content: "Manage bus assignments, approvals, operations, and notifications.",
-      },
-    ],
-  }),
-  component: AdminDashboard,
-});
-
-function AdminDashboard() {
+export function AdminDashboard() {
+  const navigate = useNavigate();
   const [pendingApprovals, setPendingApprovals] = useState<PendingLoginApproval[]>([]);
   const [buses, setBuses] = useState<AdminBus[]>([]);
   const [drivers, setDrivers] = useState<ApprovedDriver[]>([]);
   const [operationQueue, setOperationQueue] = useState<OperationQueueItem[]>([]);
+  const [activeTrips, setActiveTrips] = useState<ActiveTripAdminItem[]>([]);
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);
 
   const [showBusList, setShowBusList] = useState(false);
@@ -63,20 +43,33 @@ function AdminDashboard() {
   const [notificationMessage, setNotificationMessage] = useState("");
   const [notificationTarget, setNotificationTarget] = useState<NotificationTargetRole>("all");
   const [sendingNotification, setSendingNotification] = useState(false);
+  const [seedingBuses, setSeedingBuses] = useState(false);
+
+  useEffect(() => {
+    const session = getSession();
+    if (!session) {
+      navigate("/login", { replace: true });
+      return;
+    }
+    if (session.role !== "admin") {
+      navigate(getHomeRouteForRole(session.role), { replace: true });
+    }
+  }, [navigate]);
 
   const activeBusCount = useMemo(
-    () => buses.filter((bus) => bus.status === "active").length,
-    [buses],
+    () => Math.max(activeTrips.length, buses.filter((bus) => bus.status === "active").length),
+    [activeTrips.length, buses],
   );
 
   const loadAdminData = useCallback(async () => {
     try {
-      const [pending, busRows, driverRows, queueRows, notificationRows] = await Promise.all([
+      const [pending, busRows, driverRows, queueRows, notificationRows, activeTripRows] = await Promise.all([
         getPendingApprovals(),
         getBuses(),
         getApprovedDrivers(),
         getOperationQueue(),
         getAdminNotifications(),
+        getActiveTrips(),
       ]);
 
       setPendingApprovals(pending);
@@ -84,6 +77,7 @@ function AdminDashboard() {
       setDrivers(driverRows);
       setOperationQueue(queueRows);
       setNotifications(notificationRows);
+      setActiveTrips(activeTripRows);
     } catch (error) {
       toast.error("Unable to load admin dashboard", {
         description: error instanceof Error ? error.message : "Please refresh and try again.",
@@ -93,15 +87,17 @@ function AdminDashboard() {
 
   const refreshLiveSections = useCallback(async () => {
     try {
-      const [busRows, queueRows, notificationRows] = await Promise.all([
+      const [busRows, queueRows, notificationRows, activeTripRows] = await Promise.all([
         getBuses(),
         getOperationQueue(),
         getAdminNotifications(),
+        getActiveTrips(),
       ]);
 
       setBuses(busRows);
       setOperationQueue(queueRows);
       setNotifications(notificationRows);
+      setActiveTrips(activeTripRows);
     } catch {
       // Avoid toast spam during polling failures.
     }
@@ -190,6 +186,24 @@ function AdminDashboard() {
       });
     } finally {
       setSendingNotification(false);
+    }
+  };
+
+  const handleSeedBuses = async () => {
+    try {
+      setSeedingBuses(true);
+      const result = await seedDefaultBuses(48);
+      const latestBuses = await getBuses();
+      setBuses(latestBuses);
+      toast.success("Buses are ready", {
+        description: `${result.count} buses are now available for assignment.`,
+      });
+    } catch (error) {
+      toast.error("Unable to create buses", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setSeedingBuses(false);
     }
   };
 
@@ -319,9 +333,21 @@ function AdminDashboard() {
           </div>
 
           {buses.length === 0 ? (
-            <p className="rounded-xl border border-border bg-surface p-3 text-sm text-muted-foreground">
-              Add buses in database first to assign drivers.
-            </p>
+            <div className="space-y-3 rounded-xl border border-border bg-surface p-3">
+              <p className="text-sm text-muted-foreground">
+                No buses are available yet. Create the default fleet and then assign drivers.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSeedBuses();
+                }}
+                disabled={seedingBuses}
+                className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {seedingBuses ? "Creating buses..." : "Create 48 Buses"}
+              </button>
+            </div>
           ) : drivers.length === 0 ? (
             <p className="rounded-xl border border-border bg-surface p-3 text-sm text-muted-foreground">
               No approved drivers available yet.
@@ -354,6 +380,39 @@ function AdminDashboard() {
                       </option>
                     ))}
                   </select>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-border bg-card p-4 shadow-card sm:p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <Bus className="h-5 w-5 text-primary" />
+            <h2 className="font-display text-xl font-bold">Active Trips</h2>
+          </div>
+          {activeTrips.length === 0 ? (
+            <p className="rounded-xl border border-border bg-surface p-3 text-sm text-muted-foreground">
+              No trips are active right now.
+            </p>
+          ) : (
+            <div className="space-y-2.5">
+              {activeTrips.map((trip) => (
+                <div key={`${trip.driverUserId}-${trip.createdAt}`} className="rounded-xl border border-border bg-surface p-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-foreground">
+                      {trip.busNumber ? `Bus ${trip.busNumber}` : "Assigned bus active"}
+                    </p>
+                    <span className="rounded-full border border-success/30 bg-success/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-success">
+                      Active
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Driver {trip.driverName} · Started {new Date(trip.createdAt).toLocaleString()}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Distance {trip.distanceKm.toFixed(2)} km · Speed {trip.speedKmh.toFixed(0)} km/h
+                  </p>
                 </div>
               ))}
             </div>

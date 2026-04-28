@@ -1,8 +1,0 @@
-# Copy this file to .dev.vars for local Wrangler-based serverless development.
-# Runtime values for server-side createServerFn handlers:
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
-
-# Build/client values (also keep in .env.local for Vite dev/build if needed):
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=

@@ -1,8 +1,8 @@
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { Bus, User, LogOut, LayoutDashboard } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { clearSession, getHomeRouteForRole, getSession, type AuthSession } from "../lib/auth";
+import { clearSession, getHomeRouteForRole, getSession, type AuthSession } from "@/lib/auth";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,14 +33,15 @@ export function Navbar() {
   }, [location.pathname]);
 
   const mainRoute = session ? getHomeRouteForRole(session.role) : "/login";
-  const userInitial = session?.email.charAt(0).toUpperCase() ?? "U";
+  const userDisplay = session?.displayName || session?.loginId || session?.email || "User";
+  const userInitial = userDisplay.charAt(0).toUpperCase() || "U";
 
   const handleLogout = async () => {
     try {
       await clearSession();
       setSession(null);
       toast.success("Logged out", { description: "Please sign in to continue." });
-      navigate({ to: "/login" });
+      navigate("/login");
     } catch {
       toast.error("Logout failed", { description: "Please try again." });
     }
@@ -54,7 +55,7 @@ export function Navbar() {
             <Bus className="h-5 w-5 text-primary-foreground" strokeWidth={2.5} />
           </div>
           <div className="flex flex-col leading-tight">
-            <span className="font-display text-base font-bold tracking-tight">PulseRide</span>
+            <span className="font-display text-base font-bold tracking-tight">Transporter</span>
             <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
               Smart Transit
             </span>
@@ -94,13 +95,16 @@ export function Navbar() {
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     {roleLabel(session.role)} Account
                   </p>
-                  <p className="mt-1 text-xs font-normal text-muted-foreground">{session.email}</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{userDisplay}</p>
+                  <p className="mt-1 text-xs font-normal text-muted-foreground">
+                    {session.loginId || session.email}
+                  </p>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {!isAuthPage ? (
                   <DropdownMenuItem
                     onSelect={() => {
-                      navigate({ to: mainRoute });
+                      navigate(mainRoute);
                     }}
                   >
                     <LayoutDashboard className="h-4 w-4" /> Open Portal
@@ -136,17 +140,19 @@ function NavItem({
   to,
   label,
 }: {
-  to: "/login" | "/student" | "/driver" | "/admin";
+  to: string;
   label: string;
 }) {
   return (
-    <Link
+    <NavLink
       to={to}
-      className="rounded-full px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-      activeProps={{ className: "bg-secondary text-foreground" }}
-      activeOptions={{ exact: true }}
+      className={({ isActive }: { isActive: boolean }) =>
+        `rounded-full px-4 py-2 text-sm font-medium transition-colors hover:bg-secondary hover:text-foreground ${
+          isActive ? "bg-secondary text-foreground" : "text-muted-foreground"
+        }`
+      }
     >
       {label}
-    </Link>
+    </NavLink>
   );
 }
