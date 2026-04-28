@@ -143,7 +143,13 @@ function AdminDashboard() {
   const handleAssignDriver = async (busId: string, driverUserId: string | null) => {
     try {
       setAssigningBusId(busId);
-      await assignDriverToBus(busId, driverUserId);
+      const result = await assignDriverToBus(busId, driverUserId);
+      if (result && typeof result === "object" && "ok" in result && result.ok === false) {
+        toast.error("Unable to assign driver", {
+          description: "The bus assignment table is not available yet.",
+        });
+        return;
+      }
       const latestBuses = await getBuses();
       setBuses(latestBuses);
       toast.success("Driver assignment updated");
@@ -159,11 +165,18 @@ function AdminDashboard() {
   const handleSendNotification = async () => {
     try {
       setSendingNotification(true);
-      await sendAdminNotification({
+      const result = await sendAdminNotification({
         title: notificationTitle,
         message: notificationMessage,
         targetRole: notificationTarget,
       });
+
+      if (result && typeof result === "object" && "ok" in result && result.ok === false) {
+        toast.error("Unable to send notification", {
+          description: "The notifications table is not available yet.",
+        });
+        return;
+      }
 
       setNotificationTitle("");
       setNotificationMessage("");

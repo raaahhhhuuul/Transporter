@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 import { getServerSupabaseConfig } from "@/lib/server-env";
+import { isMissingSupabaseTableError } from "@/lib/supabase-errors";
 
 export type BusStatus = "active" | "inactive" | "maintenance";
 export type OperationEventType = "trip_started" | "trip_ended";
@@ -107,7 +108,10 @@ const getBusesServerFn = createServerFn({ method: "GET" }).handler(async () => {
     .select("id, bus_number, route_name, plate, status, assigned_driver_user_id, updated_at")
     .order("bus_number", { ascending: true });
 
-  if (busError) throw new Error(busError.message);
+  if (busError) {
+    if (isMissingSupabaseTableError(busError)) return [];
+    throw new Error(busError.message);
+  }
 
   const busRows = (buses ?? []) as BusRow[];
   const assignedDriverIds = Array.from(
@@ -126,7 +130,10 @@ const getBusesServerFn = createServerFn({ method: "GET" }).handler(async () => {
       .select("user_id, name, login_id")
       .in("user_id", assignedDriverIds);
 
-    if (driversError) throw new Error(driversError.message);
+    if (driversError) {
+      if (isMissingSupabaseTableError(driversError)) return [];
+      throw new Error(driversError.message);
+    }
 
     driverMap = new Map(
       ((drivers ?? []) as Array<Pick<DriverRow, "user_id" | "name" | "login_id">>).map((driver) => [
@@ -193,7 +200,10 @@ const assignDriverToBusServerFn = createServerFn({ method: "POST" })
         .eq("assigned_driver_user_id", data.driverUserId)
         .neq("id", data.busId);
 
-      if (clearExistingError) throw new Error(clearExistingError.message);
+      if (clearExistingError) {
+        if (isMissingSupabaseTableError(clearExistingError)) return { ok: false };
+        throw new Error(clearExistingError.message);
+      }
     }
 
     const { error } = await adminSupabase
@@ -204,7 +214,10 @@ const assignDriverToBusServerFn = createServerFn({ method: "POST" })
       })
       .eq("id", data.busId);
 
-    if (error) throw new Error(error.message);
+    if (error) {
+      if (isMissingSupabaseTableError(error)) return { ok: false };
+      throw new Error(error.message);
+    }
 
     return { ok: true };
   });
@@ -220,7 +233,10 @@ const getOperationQueueServerFn = createServerFn({ method: "GET" }).handler(asyn
     .order("created_at", { ascending: false })
     .limit(30);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingSupabaseTableError(error)) return [];
+    throw new Error(error.message);
+  }
 
   return ((data ?? []) as OperationEventRow[]).map(
     (row) =>
@@ -247,7 +263,10 @@ const getAdminNotificationsServerFn = createServerFn({ method: "GET" }).handler(
     .order("created_at", { ascending: false })
     .limit(20);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingSupabaseTableError(error)) return [];
+    throw new Error(error.message);
+  }
 
   return ((data ?? []) as NotificationRow[]).map(
     (row) =>
@@ -281,7 +300,10 @@ const sendAdminNotificationServerFn = createServerFn({ method: "POST" })
       target_role: data.targetRole,
     });
 
-    if (error) throw new Error(error.message);
+    if (error) {
+      if (isMissingSupabaseTableError(error)) return { ok: false };
+      throw new Error(error.message);
+    }
 
     return { ok: true };
   });

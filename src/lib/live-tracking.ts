@@ -1,7 +1,10 @@
 import { supabase } from "@/lib/supabase";
+import { isMissingSupabaseTableError } from "@/lib/supabase-errors";
 
 const LOCAL_TRACKING_KEY = "transporter.liveTracking.v1";
 const TRACKING_EVENT = "transporter-live-tracking-updated";
+const LIVE_TRACKING_TABLE_FLAG = "transporter.supabase.driverLiveTracking.available";
+const OPERATION_EVENTS_TABLE_FLAG = "transporter.supabase.operationEvents.available";
 
 export interface LiveTrackingRecord {
   latitude: number;
@@ -54,6 +57,26 @@ export interface TripStartLocation {
   longitude: number;
   createdAt: string;
 }
+
+let liveTrackingTableAvailable = true;
+let operationEventsTableAvailable = true;
+
+function readAvailabilityFlag(key: string): boolean {
+  if (typeof window === "undefined") return true;
+
+  const stored = window.localStorage.getItem(key);
+  if (stored === null) return true;
+
+  return stored !== "false";
+}
+
+function writeAvailabilityFlag(key: string, available: boolean) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(key, available ? "true" : "false");
+}
+
+liveTrackingTableAvailable = readAvailabilityFlag(LIVE_TRACKING_TABLE_FLAG);
+operationEventsTableAvailable = readAvailabilityFlag(OPERATION_EVENTS_TABLE_FLAG);
 
 function isValidNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -135,6 +158,8 @@ async function logOperationEvent(
   record: LiveTrackingRecord,
   userId: string,
 ): Promise<void> {
+  if (!operationEventsTableAvailable) return;
+
   let driverName = "Driver";
   let busId: string | null = null;
   let busNumber: string | null = null;
@@ -177,6 +202,12 @@ async function logOperationEvent(
     return;
   }
 
+  if (isMissingSupabaseTableError(error)) {
+    operationEventsTableAvailable = false;
+    writeAvailabilityFlag(OPERATION_EVENTS_TABLE_FLAG, false);
+    return;
+  }
+
   // Backward-compatible insert path when latitude/longitude columns are not present yet.
   const { error: fallbackError } = await supabase.from("operation_events").insert({
     event_type: eventType,
@@ -189,26 +220,12 @@ async function logOperationEvent(
   });
 
   if (fallbackError) {
+    if (isMissingSupabaseTableError(fallbackError)) {
+      operationEventsTableAvailable = false;
+      writeAvailabilityFlag(OPERATION_EVENTS_TABLE_FLAG, false);
+      return;
+    }
     console.warn("Failed to log operation event:", fallbackError.message);
-  }
-}
-
-async function readRemoteTracking(): Promise<LiveTrackingRecord | null> {
-  try {
-    const { data, error } = await supabase
-      .from("driver_live_tracking")
-      .select(
-        "user_id, latitude, longitude, speed_kmh, distance_km, is_active, started_at, updated_at",
-      )
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle<RemoteTrackingRow>();
-
-    if (error || !data) return null;
-
-    return toRecordFromRemote(data);
-  } catch {
-    return null;
   }
 }
 
@@ -232,14 +249,7 @@ export function getCachedDriverTracking(): LiveTrackingRecord | null {
 
 export async function getLatestDriverTracking(): Promise<LiveTrackingRecord | null> {
   const cached = getCachedDriverTracking();
-  const remote = await readRemoteTracking();
-
-  if (!remote) return cached;
-
-  if (!cached || isNewerThan(remote.updatedAt, cached.updatedAt)) {
-    cacheTracking(remote);
-    return remote;
-  }
+  if (!cached) return null;
 
   return cached;
 }
@@ -247,6 +257,8 @@ export async function getLatestDriverTracking(): Promise<LiveTrackingRecord | nu
 export async function getDriverTripStartLocation(
   driverUserId: string,
 ): Promise<TripStartLocation | null> {
+  if (!operationEventsTableAvailable) return null;
+
   try {
     const { data, error } = await supabase
       .from("operation_events")
@@ -257,7 +269,12 @@ export async function getDriverTripStartLocation(
       .limit(1)
       .maybeSingle<TripStartRow>();
 
-    if (error || !data) return null;
+    if (error || !data) {
+      if (isMissingSupabaseTableError(error)) {
+        operationEventsTableAvailable = false;
+      }
+      return null;
+    }
     if (!isValidNumber(data.latitude) || !isValidNumber(data.longitude)) return null;
 
     return {
@@ -307,6 +324,11 @@ export async function saveDriverTracking(input: SaveDriverTrackingInput): Promis
   );
 
   if (error) {
+    if (isMissingSupabaseTableError(error)) {
+      liveTrackingTableAvailable = false;
+      writeAvailabilityFlag(LIVE_TRACKING_TABLE_FLAG, false);
+      return;
+    }
     console.warn("Failed to sync driver tracking to Supabase:", error.message);
   }
 

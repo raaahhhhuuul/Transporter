@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import { supabase } from "@/lib/supabase";
 import { getServerSupabaseConfig } from "@/lib/server-env";
+import { isMissingSupabaseTableError } from "@/lib/supabase-errors";
 
 export type UserRole = "student" | "driver" | "admin";
 export type RegistrableRole = "student" | "driver";
@@ -98,6 +99,7 @@ interface LoginApprovalRow {
 
 const SESSION_KEY = "pulseride.session.v1";
 const ADMIN_LOGIN_ID = "transporter@admin.com";
+const ADMIN_LOGIN_ALIASES = new Set([ADMIN_LOGIN_ID, "admin"]);
 const roleHomePath: Record<UserRole, "/student" | "/driver" | "/admin"> = {
   student: "/student",
   driver: "/driver",
@@ -240,6 +242,7 @@ const getPendingApprovalsServerFn = createServerFn({ method: "GET" }).handler(as
     .order("requested_at", { ascending: false });
 
   if (error) {
+    if (isMissingSupabaseTableError(error)) return [];
     throw new Error(error.message);
   }
 
@@ -272,6 +275,7 @@ const approveUserServerFn = createServerFn({ method: "POST" })
       .maybeSingle();
 
     if (requestError) {
+      if (isMissingSupabaseTableError(requestError)) return null;
       throw new Error(requestError.message);
     }
 
@@ -286,6 +290,7 @@ const approveUserServerFn = createServerFn({ method: "POST" })
       .maybeSingle<RegistrationRow>();
 
     if (registrationError) {
+      if (isMissingSupabaseTableError(registrationError)) return null;
       throw new Error(registrationError.message);
     }
 
@@ -304,6 +309,7 @@ const approveUserServerFn = createServerFn({ method: "POST" })
       .eq("id", data.requestId);
 
     if (approvalError) {
+      if (isMissingSupabaseTableError(approvalError)) return null;
       throw new Error(approvalError.message);
     }
 
@@ -316,6 +322,7 @@ const approveUserServerFn = createServerFn({ method: "POST" })
       .eq("id", registration.id);
 
     if (registrationUpdateError) {
+      if (isMissingSupabaseTableError(registrationUpdateError)) return null;
       throw new Error(registrationUpdateError.message);
     }
 
@@ -335,6 +342,7 @@ const approveUserServerFn = createServerFn({ method: "POST" })
       });
 
     if (approvedInsertError) {
+      if (isMissingSupabaseTableError(approvedInsertError)) return null;
       throw new Error(approvedInsertError.message);
     }
 
@@ -476,7 +484,10 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
     throw new Error("Login ID and password are required");
   }
 
-  if (normalizedLoginId === ADMIN_LOGIN_ID && normalizedPassword === "admin123") {
+  if (ADMIN_LOGIN_ALIASES.has(normalizedLoginId)) {
+    if (normalizedPassword !== "admin123") {
+      throw new Error("Invalid admin password. Use admin123.");
+    }
     const token = createMockJwt({
       sub: normalizedLoginId,
       role: "admin",
