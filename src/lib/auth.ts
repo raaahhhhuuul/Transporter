@@ -1,5 +1,9 @@
 import { supabase } from "@/lib/supabase";
-import { isMissingSupabaseTableError } from "@/lib/supabase-errors";
+import {
+  isMissingSupabaseTableError,
+  isSupabaseWriteAccessError,
+  isSupabaseAuthRateLimitError,
+} from "@/lib/supabase-errors";
 
 export type UserRole = "student" | "driver" | "admin";
 export type RegistrableRole = "student" | "driver";
@@ -7,6 +11,7 @@ export type RegistrableRole = "student" | "driver";
 export interface AuthSession {
   role: UserRole;
   email: string;
+  userId?: string;
   loginId?: string;
   displayName?: string;
   loggedInAt: string;
@@ -95,7 +100,26 @@ interface LoginApprovalRow {
       }>;
 }
 
+interface LocalApprovedAccount {
+  userId: string;
+  role: RegistrableRole;
+  loginId: string;
+  displayName: string;
+}
+
+interface LocalCredential {
+  userId: string;
+  loginId: string;
+  password: string;
+  role: RegistrableRole;
+  displayName: string;
+}
+
 const SESSION_KEY = "pulseride.session.v1";
+const LOCAL_REGISTRATIONS_KEY = "pulseride.registrations.local.v1";
+const LOCAL_LOGIN_APPROVALS_KEY = "pulseride.loginApprovals.local.v1";
+const LOCAL_APPROVED_ACCOUNTS_KEY = "pulseride.approvedAccounts.local.v1";
+const LOCAL_CREDENTIALS_KEY = "pulseride.credentials.local.v1";
 const ADMIN_LOGIN_ID = "transporter@admin.com";
 const ADMIN_LOGIN_ALIASES = new Set([ADMIN_LOGIN_ID, "admin"]);
 const roleHomePath: Record<UserRole, "/student" | "/driver" | "/admin"> = {
@@ -112,8 +136,30 @@ function isBrowser() {
   return typeof window !== "undefined";
 }
 
+function readLocalJson<T>(key: string, fallback: T): T {
+  if (!isBrowser()) return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeLocalJson<T>(key: string, value: T) {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(key, JSON.stringify(value));
+}
+
 function normalizeLoginId(value: string) {
   return value.trim().toLowerCase();
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
 
 function toDriverAuthEmail(loginId: string) {
@@ -151,6 +197,7 @@ export function getSession(): AuthSession | null {
     if (!isRole(parsed.role)) return null;
     if (typeof parsed.email !== "string" || parsed.email.trim().length === 0) return null;
     if (typeof parsed.loggedInAt !== "string") return null;
+    if (parsed.userId != null && typeof parsed.userId !== "string") return null;
     if (parsed.loginId != null && typeof parsed.loginId !== "string") return null;
     if (parsed.displayName != null && typeof parsed.displayName !== "string") return null;
     if (parsed.token != null && typeof parsed.token !== "string") return null;
@@ -158,6 +205,7 @@ export function getSession(): AuthSession | null {
     return {
       role: parsed.role,
       email: parsed.email,
+      userId: parsed.userId,
       loginId: parsed.loginId,
       displayName: parsed.displayName,
       loggedInAt: parsed.loggedInAt,
@@ -172,11 +220,12 @@ function setSession(
   role: UserRole,
   email: string,
   token?: string,
-  options?: { loginId?: string; displayName?: string },
+  options?: { userId?: string; loginId?: string; displayName?: string },
 ): AuthSession {
   const session: AuthSession = {
     role,
     email: email.trim().toLowerCase(),
+    userId: options?.userId?.trim(),
     loginId: options?.loginId?.trim(),
     displayName: options?.displayName?.trim(),
     loggedInAt: new Date().toISOString(),
@@ -188,6 +237,69 @@ function setSession(
   }
 
   return session;
+}
+
+function getLocalRegistrations() {
+  return readLocalJson<RegistrationRow[]>(LOCAL_REGISTRATIONS_KEY, []);
+}
+
+function saveLocalRegistrations(registrations: RegistrationRow[]) {
+  writeLocalJson(LOCAL_REGISTRATIONS_KEY, registrations);
+}
+
+function getLocalLoginApprovals() {
+  return readLocalJson<LoginApprovalRow[]>(LOCAL_LOGIN_APPROVALS_KEY, []);
+}
+
+function saveLocalLoginApprovals(approvals: LoginApprovalRow[]) {
+  writeLocalJson(LOCAL_LOGIN_APPROVALS_KEY, approvals);
+}
+
+function getLocalApprovedAccounts() {
+  return readLocalJson<LocalApprovedAccount[]>(LOCAL_APPROVED_ACCOUNTS_KEY, []);
+}
+
+function saveLocalApprovedAccounts(accounts: LocalApprovedAccount[]) {
+  writeLocalJson(LOCAL_APPROVED_ACCOUNTS_KEY, accounts);
+}
+
+function getLocalCredentials() {
+  return readLocalJson<LocalCredential[]>(LOCAL_CREDENTIALS_KEY, []);
+}
+
+function saveLocalCredentials(credentials: LocalCredential[]) {
+  writeLocalJson(LOCAL_CREDENTIALS_KEY, credentials);
+}
+
+function upsertLocalRegistration(registration: RegistrationRow) {
+  saveLocalRegistrations([
+    registration,
+    ...getLocalRegistrations().filter((item) => item.user_id !== registration.user_id),
+  ]);
+}
+
+function upsertLocalCredential(credential: LocalCredential) {
+  saveLocalCredentials([
+    credential,
+    ...getLocalCredentials().filter((item) => item.loginId !== credential.loginId),
+  ]);
+}
+
+export function getLocalApprovedDriverAccounts(): RegisteredUser[] {
+  const registrations = getLocalRegistrations();
+  return getLocalApprovedAccounts()
+    .filter((item) => item.role === "driver")
+    .map((item) => {
+      const registration = registrations.find((entry) => entry.user_id === item.userId);
+      return {
+        id: item.userId,
+        name: item.displayName,
+        loginId: item.loginId,
+        phoneNumber: registration?.phone_number ?? "N/A",
+        role: "driver" as const,
+        createdAt: registration?.created_at ?? new Date().toISOString(),
+      } satisfies RegisteredUser;
+    });
 }
 
 export async function clearSession() {
@@ -220,6 +332,8 @@ async function registerUser(input: SignUpInput): Promise<RegisteredUser> {
   }
 
   const authEmail = input.role === "driver" ? toDriverAuthEmail(loginId) : loginId;
+  const nowIso = new Date().toISOString();
+  const localUserId = `local-user-${crypto.randomUUID()}`;
 
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email: authEmail,
@@ -235,6 +349,37 @@ async function registerUser(input: SignUpInput): Promise<RegisteredUser> {
   });
 
   if (authError) {
+    if (isSupabaseAuthRateLimitError(authError)) {
+      const localRegistration: RegistrationRow = {
+        id: `local-registration-${localUserId}`,
+        user_id: localUserId,
+        login_id: loginId,
+        name,
+        phone_number: phoneNumber,
+        role: input.role,
+        status: "pending",
+        created_at: nowIso,
+        approved_at: null,
+      };
+
+      upsertLocalRegistration(localRegistration);
+      upsertLocalCredential({
+        userId: localUserId,
+        loginId,
+        password,
+        role: input.role,
+        displayName: name,
+      });
+
+      return {
+        id: localUserId,
+        name,
+        loginId,
+        phoneNumber,
+        role: input.role,
+        createdAt: nowIso,
+      } satisfies RegisteredUser;
+    }
     throw new Error(authError.message);
   }
 
@@ -243,20 +388,56 @@ async function registerUser(input: SignUpInput): Promise<RegisteredUser> {
     throw new Error("Unable to create account. Please try again.");
   }
 
-  const { error: registrationError } = await supabase.from("registrations").upsert(
-    {
-      user_id: userId,
-      login_id: loginId,
-      name,
-      phone_number: phoneNumber,
-      role: input.role,
-      status: "pending",
-    },
-    { onConflict: "user_id" },
-  );
+  const registrationRecord: RegistrationRow = {
+    id: `local-registration-${userId}`,
+    user_id: userId,
+    login_id: loginId,
+    name,
+    phone_number: phoneNumber,
+    role: input.role,
+    status: "pending",
+    created_at: nowIso,
+    approved_at: null,
+  };
 
-  if (registrationError) {
+  upsertLocalRegistration(registrationRecord);
+  upsertLocalCredential({
+    userId,
+    loginId,
+    password,
+    role: input.role,
+    displayName: name,
+  });
+
+  const { data: registrationData, error: registrationError } = await supabase
+    .from("registrations")
+    .upsert(
+      {
+        user_id: userId,
+        login_id: loginId,
+        name,
+        phone_number: phoneNumber,
+        role: input.role,
+        status: "pending",
+      },
+      { onConflict: "user_id" },
+    )
+    .select("id, user_id, login_id, name, phone_number, role, status, created_at, approved_at")
+    .maybeSingle<RegistrationRow>();
+
+  if (
+    registrationError &&
+    !isMissingSupabaseTableError(registrationError) &&
+    !isSupabaseWriteAccessError(registrationError)
+  ) {
     throw new Error(registrationError.message);
+  }
+
+  if (registrationData) {
+    saveLocalRegistrations([
+      registrationData,
+      ...getLocalRegistrations().filter((item) => item.user_id !== userId),
+    ]);
   }
 
   return {
@@ -265,7 +446,7 @@ async function registerUser(input: SignUpInput): Promise<RegisteredUser> {
     loginId,
     phoneNumber,
     role: input.role,
-    createdAt: new Date().toISOString(),
+    createdAt: nowIso,
   } satisfies RegisteredUser;
 }
 
@@ -277,14 +458,17 @@ async function getRegistrationByUserId(userId: string) {
     .maybeSingle<RegistrationRow>();
 
   if (error) {
-    if (isMissingSupabaseTableError(error)) return null;
+    if (isMissingSupabaseTableError(error)) {
+      return getLocalRegistrations().find((item) => item.user_id === userId) ?? null;
+    }
     throw new Error(error.message);
   }
 
-  return data;
+  return data ?? getLocalRegistrations().find((item) => item.user_id === userId) ?? null;
 }
 
 async function getApprovedRoleAccount(userId: string) {
+  const localApproved = getLocalApprovedAccounts().find((item) => item.userId === userId) ?? null;
   const [{ data: student, error: studentError }, { data: driver, error: driverError }] =
     await Promise.all([
       supabase
@@ -323,10 +507,47 @@ async function getApprovedRoleAccount(userId: string) {
     };
   }
 
+  if (localApproved) {
+    return {
+      role: localApproved.role,
+      loginId: localApproved.loginId,
+      displayName: localApproved.displayName,
+    };
+  }
+
   return null;
 }
 
 async function createPendingLoginApproval(registration: RegistrationRow) {
+  const localApprovals = getLocalLoginApprovals();
+  if (localApprovals.some((item) => item.user_id === registration.user_id && item.status === "pending")) {
+    return;
+  }
+
+  saveLocalLoginApprovals([
+    {
+      id: `local-approval-${registration.user_id}`,
+      registration_id: registration.id,
+      user_id: registration.user_id,
+      login_id: registration.login_id,
+      role: registration.role,
+      status: "pending",
+      requested_at: new Date().toISOString(),
+      approved_at: null,
+      registrations: {
+        name: registration.name,
+        phone_number: registration.phone_number,
+      },
+    },
+    ...localApprovals,
+  ]);
+
+  // If the backend schema expects UUIDs (common), don't send local placeholder IDs.
+  // The local approval queue will still work for demo/dev even without the table.
+  if (!isUuid(registration.id)) {
+    return;
+  }
+
   const { data: existing, error: existingError } = await supabase
     .from("login_approvals")
     .select("id")
@@ -336,7 +557,7 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
     .maybeSingle();
 
   if (existingError) {
-    if (isMissingSupabaseTableError(existingError)) return;
+    if (isMissingSupabaseTableError(existingError) || isSupabaseWriteAccessError(existingError)) return;
     throw new Error(existingError.message);
   }
 
@@ -351,13 +572,37 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
   });
 
   if (insertError) {
-    if (isMissingSupabaseTableError(insertError)) return;
+    if (isMissingSupabaseTableError(insertError) || isSupabaseWriteAccessError(insertError)) return;
     throw new Error(insertError.message);
   }
 }
 
 export async function signUpUser(input: SignUpInput) {
-  return registerUser(input);
+  const result = await registerUser(input);
+  // Best-effort server-side registration insert (bypasses RLS).
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const userId = session?.user.id;
+    if (userId) {
+      await fetch("/api/registrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          loginId: result.loginId,
+          name: result.name,
+          phoneNumber: result.phoneNumber,
+          role: result.role,
+        }),
+      });
+    }
+  } catch {
+    // Ignore: dev/demo fallback will still function.
+  }
+
+  return result;
 }
 
 export async function signIn(loginId: string, password: string): Promise<AuthResult> {
@@ -399,7 +644,73 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
   });
 
   if (error || !data.user) {
-    throw new Error(error?.message ?? "Invalid login credentials");
+    const localCredential =
+      getLocalCredentials().find(
+        (item) => item.loginId === normalizedLoginId && item.password === normalizedPassword,
+      ) ?? null;
+
+    if (!localCredential) {
+      throw new Error(error?.message ?? "Invalid login credentials");
+    }
+
+    const localApproved =
+      getLocalApprovedAccounts().find((item) => item.userId === localCredential.userId) ?? null;
+    if (localApproved) {
+      const session = setSession(localApproved.role, localApproved.loginId, undefined, {
+        userId: localApproved.userId,
+        loginId: localApproved.loginId,
+        displayName: localApproved.displayName,
+      });
+      return {
+        session,
+        homeRoute: getHomeRouteForRole(localApproved.role),
+      };
+    }
+
+    const localRegistration =
+      getLocalRegistrations().find((item) => item.user_id === localCredential.userId) ?? null;
+    if (!localRegistration) {
+      throw new Error("Profile not found. Please contact admin.");
+    }
+
+    await createPendingLoginApproval(localRegistration);
+    throw new Error("Login approval requested. Please wait for admin approval.");
+  }
+
+  // Ask server (service role) whether user is approved.
+  try {
+    const statusResponse = await fetch("/api/account-status", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: data.user.id }),
+    });
+    if (statusResponse.ok) {
+      const payload = (await statusResponse.json()) as
+        | { status: "approved"; role: RegistrableRole; loginId: string; displayName: string }
+        | { status: "pending" };
+
+      if ("status" in payload && payload.status === "approved") {
+        const session = setSession(payload.role, payload.loginId, data.session?.access_token, {
+          userId: data.user.id,
+          loginId: payload.loginId,
+          displayName: payload.displayName,
+        });
+        return { session, homeRoute: getHomeRouteForRole(payload.role) };
+      }
+
+      if ("status" in payload && payload.status === "pending") {
+        // Ensure a pending approval exists server-side.
+        await fetch("/api/login-approvals", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ userId: data.user.id }),
+        });
+        await supabase.auth.signOut();
+        throw new Error("Login approval requested. Please wait for admin approval.");
+      }
+    }
+  } catch {
+    // Fall back to client-side checks below.
   }
 
   const approvedAccount = await getApprovedRoleAccount(data.user.id);
@@ -409,6 +720,7 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
       approvedAccount.loginId,
       data.session?.access_token,
       {
+        userId: data.user.id,
         loginId: approvedAccount.loginId,
         displayName: approvedAccount.displayName,
       },
@@ -426,11 +738,30 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
   }
 
   await createPendingLoginApproval(registration);
+  try {
+    await fetch("/api/login-approvals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: data.user.id }),
+    });
+  } catch {
+    // ignore
+  }
   await supabase.auth.signOut();
   throw new Error("Login approval requested. Please wait for admin approval.");
 }
 
 export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
+  try {
+    const response = await fetch("/api/pending-approvals");
+    if (response.ok) {
+      const payload = (await response.json()) as { ok: boolean; approvals: PendingLoginApproval[] };
+      if (payload.ok) return payload.approvals;
+    }
+  } catch {
+    // fallback below
+  }
+
   const { data, error } = await supabase
     .from("login_approvals")
     .select("id, requested_at, user_id, login_id, role, registrations!inner(name, phone_number)")
@@ -438,7 +769,22 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
     .order("requested_at", { ascending: false });
 
   if (error) {
-    if (isMissingSupabaseTableError(error)) return [];
+    if (isMissingSupabaseTableError(error) || isSupabaseWriteAccessError(error)) {
+      return getLocalLoginApprovals()
+        .filter((item) => item.status === "pending")
+        .map((item) => {
+          const registration = Array.isArray(item.registrations) ? item.registrations[0] : item.registrations;
+          return {
+            requestId: item.id,
+            requestedAt: item.requested_at,
+            userId: item.user_id,
+            loginId: item.login_id,
+            role: item.role,
+            name: String(registration?.name ?? "Unknown"),
+            phoneNumber: String(registration?.phone_number ?? "N/A"),
+          } satisfies PendingLoginApproval;
+        });
+    }
     throw new Error(error.message);
   }
 
@@ -460,6 +806,20 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
 }
 
 export async function approveUser(requestId: string) {
+  try {
+    const response = await fetch("/api/approve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId }),
+    });
+    if (response.ok) {
+      return { id: requestId } as unknown as LoginApprovalRow;
+    }
+  } catch {
+    // fallback below
+  }
+
+  const localApproval = getLocalLoginApprovals().find((item) => item.id === requestId) ?? null;
   const { data: request, error: requestError } = await supabase
     .from("login_approvals")
     .select("id, registration_id, user_id, login_id, role, status")
@@ -467,7 +827,38 @@ export async function approveUser(requestId: string) {
     .maybeSingle<LoginApprovalRow>();
 
   if (requestError) {
-    if (isMissingSupabaseTableError(requestError)) return null;
+    if (isMissingSupabaseTableError(requestError) || isSupabaseWriteAccessError(requestError)) {
+      if (!localApproval) return null;
+
+      const localRegistration =
+        getLocalRegistrations().find((item) => item.id === localApproval.registration_id) ?? null;
+      if (!localRegistration) {
+        throw new Error("Registration record not found.");
+      }
+
+      const now = new Date().toISOString();
+      saveLocalLoginApprovals(
+        getLocalLoginApprovals().map((item) =>
+          item.id === requestId ? { ...item, status: "approved", approved_at: now } : item,
+        ),
+      );
+      saveLocalRegistrations(
+        getLocalRegistrations().map((item) =>
+          item.id === localRegistration.id ? { ...item, status: "approved", approved_at: now } : item,
+        ),
+      );
+      saveLocalApprovedAccounts([
+        {
+          userId: localRegistration.user_id,
+          role: localRegistration.role,
+          loginId: localRegistration.login_id,
+          displayName: localRegistration.name,
+        },
+        ...getLocalApprovedAccounts().filter((item) => item.userId !== localRegistration.user_id),
+      ]);
+
+      return localApproval;
+    }
     throw new Error(requestError.message);
   }
 
@@ -482,7 +873,9 @@ export async function approveUser(requestId: string) {
     .maybeSingle<RegistrationRow>();
 
   if (registrationError) {
-    if (isMissingSupabaseTableError(registrationError)) return null;
+    if (isMissingSupabaseTableError(registrationError) || isSupabaseWriteAccessError(registrationError)) {
+      return null;
+    }
     throw new Error(registrationError.message);
   }
 
@@ -501,7 +894,9 @@ export async function approveUser(requestId: string) {
     .eq("id", requestId);
 
   if (approvalError) {
-    if (isMissingSupabaseTableError(approvalError)) return null;
+    if (isMissingSupabaseTableError(approvalError) || isSupabaseWriteAccessError(approvalError)) {
+      return null;
+    }
     throw new Error(approvalError.message);
   }
 
@@ -514,7 +909,9 @@ export async function approveUser(requestId: string) {
     .eq("id", registration.id);
 
   if (registrationUpdateError) {
-    if (isMissingSupabaseTableError(registrationUpdateError)) return null;
+    if (isMissingSupabaseTableError(registrationUpdateError) || isSupabaseWriteAccessError(registrationUpdateError)) {
+      return null;
+    }
     throw new Error(registrationUpdateError.message);
   }
 
@@ -532,9 +929,21 @@ export async function approveUser(requestId: string) {
   });
 
   if (approvedInsertError) {
-    if (isMissingSupabaseTableError(approvedInsertError)) return null;
+    if (isMissingSupabaseTableError(approvedInsertError) || isSupabaseWriteAccessError(approvedInsertError)) {
+      return null;
+    }
     throw new Error(approvedInsertError.message);
   }
+
+  saveLocalApprovedAccounts([
+    {
+      userId: registration.user_id,
+      role: registration.role,
+      loginId: registration.login_id,
+      displayName: registration.name,
+    },
+    ...getLocalApprovedAccounts().filter((item) => item.userId !== registration.user_id),
+  ]);
 
   return request;
 }

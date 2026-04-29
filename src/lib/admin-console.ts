@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { isMissingSupabaseTableError } from "@/lib/supabase-errors";
+import { getLocalApprovedDriverAccounts } from "@/lib/auth";
 
 export type BusStatus = "active" | "inactive" | "maintenance";
 export type OperationEventType = "trip_started" | "trip_ended";
@@ -316,11 +317,11 @@ export async function getApprovedDrivers() {
     .order("name", { ascending: true });
 
   if (error) {
-    if (isMissingSupabaseTableError(error)) return [];
+    if (isMissingSupabaseTableError(error)) return getLocalApprovedDriverAccounts();
     throw new Error(error.message);
   }
 
-  return ((data ?? []) as DriverRow[]).map(
+  const remoteDrivers = ((data ?? []) as DriverRow[]).map(
     (driver) =>
       ({
         userId: driver.user_id,
@@ -330,6 +331,12 @@ export async function getApprovedDrivers() {
         createdAt: driver.created_at,
       }) satisfies ApprovedDriver,
   );
+
+  const localDrivers = getLocalApprovedDriverAccounts().filter(
+    (localDriver) => !remoteDrivers.some((remoteDriver) => remoteDriver.userId === localDriver.userId),
+  );
+
+  return [...remoteDrivers, ...localDrivers].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function assignDriverToBus(busId: string, driverUserId: string | null) {

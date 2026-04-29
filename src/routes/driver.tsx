@@ -31,6 +31,11 @@ export function DriverPanel() {
   const [distance, setDistance] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [driverName, setDriverName] = useState("Driver");
+  const [assignedBus, setAssignedBus] = useState<{
+    busNumber: string;
+    routeName: string;
+  } | null>(null);
+  const [assignmentLoading, setAssignmentLoading] = useState(true);
   const [assignedBusLabel, setAssignedBusLabel] = useState<string | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const { notifications } = useRoleNotifications("driver");
@@ -85,17 +90,30 @@ export function DriverPanel() {
 
     const loadAssignedBus = async () => {
       try {
+        const localSession = getSession();
         const {
           data: { session: supabaseSession },
         } = await supabase.auth.getSession();
-        const userId = supabaseSession?.user.id;
-        if (!userId) return;
+        const userId = supabaseSession?.user.id ?? localSession?.userId;
+        if (!userId) {
+          if (!isMounted) return;
+          setAssignedBus(null);
+          setAssignedBusLabel(null);
+          setAssignmentLoading(false);
+          return;
+        }
         const bus = await getAssignedBusForDriver(userId);
         if (!isMounted) return;
+        setAssignedBus(bus ? { busNumber: bus.busNumber, routeName: bus.routeName } : null);
         setAssignedBusLabel(bus ? `${bus.busNumber} · ${bus.routeName}` : null);
       } catch {
         if (!isMounted) return;
+        setAssignedBus(null);
         setAssignedBusLabel(null);
+      } finally {
+        if (isMounted) {
+          setAssignmentLoading(false);
+        }
       }
     };
 
@@ -279,6 +297,81 @@ export function DriverPanel() {
     const ss = String(s).padStart(2, "0");
     return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
   };
+
+  if (assignmentLoading) {
+    return (
+      <div className="h-full">
+        <div className="px-4 py-4 space-y-3 sm:px-5 sm:py-5">
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Driver Console
+            </p>
+            <h1 className="mt-1 font-display text-2xl font-bold tracking-tight sm:text-3xl">
+              Welcome, {driverName}
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Checking your bus assignment...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!assignedBus) {
+    return (
+      <div className="h-full">
+        <div className="px-4 py-4 space-y-3 sm:px-5 sm:py-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Driver Console
+              </p>
+              <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">
+                Welcome, {driverName}
+              </h1>
+            </div>
+            <StatusBadge status="inactive" />
+          </div>
+
+          <div className="rounded-2xl border border-warning/30 bg-warning/10 p-5 shadow-card">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-warning">
+              Assignment Pending
+            </p>
+            <h2 className="mt-2 font-display text-2xl font-bold text-foreground">
+              Wait till you are assigned to a bus.
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Your login is approved, but admin still needs to assign you a bus number and route
+              before you can access the driver dashboard.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-card p-4 shadow-card">
+            <div className="flex items-center gap-2">
+              <BellRing className="h-4 w-4 text-primary" />
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Admin Notifications
+              </p>
+            </div>
+
+            {notifications.length === 0 ? (
+              <p className="mt-2 text-sm text-muted-foreground">No notifications right now.</p>
+            ) : (
+              <div className="mt-2 space-y-2">
+                {notifications.slice(0, 3).map((note) => (
+                  <div key={note.id} className="rounded-xl border border-border bg-surface p-3">
+                    <p className="text-sm font-semibold">{note.title}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{note.message}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   /* ================================================================ */
   /*  RENDER — clean, simple sidebar                                  */
