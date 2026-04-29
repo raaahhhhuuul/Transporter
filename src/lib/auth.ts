@@ -605,6 +605,13 @@ export async function signUpUser(input: SignUpInput) {
           role: result.role,
         }),
       });
+
+      // Also create pending approval at signup time so admin can see requests immediately.
+      await fetch("/api/login-approvals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
     }
   } catch {
     // Ignore: dev/demo fallback will still function.
@@ -708,11 +715,17 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
 
       if ("status" in payload && payload.status === "pending") {
         // Ensure a pending approval exists server-side.
-        await fetch("/api/login-approvals", {
+        const approvalResponse = await fetch("/api/login-approvals", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ userId: data.user.id }),
         });
+        if (!approvalResponse.ok) {
+          const fallbackRegistration = await getRegistrationByUserId(data.user.id);
+          if (fallbackRegistration) {
+            await createPendingLoginApproval(fallbackRegistration);
+          }
+        }
         await supabase.auth.signOut();
         throw new Error("Login approval requested. Please wait for admin approval.");
       }
@@ -747,11 +760,14 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
 
   await createPendingLoginApproval(registration);
   try {
-    await fetch("/api/login-approvals", {
+    const response = await fetch("/api/login-approvals", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId: data.user.id }),
     });
+    if (!response.ok) {
+      // Server path failed; local path above has already queued approval.
+    }
   } catch {
     // ignore
   }
