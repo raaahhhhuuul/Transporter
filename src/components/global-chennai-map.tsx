@@ -131,6 +131,20 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
     return null;
   }
 
+  function SyncMapCenter({ center }: { center: [number, number] }) {
+    const map = useMap();
+
+    useEffect(() => {
+      const current = map.getCenter();
+      const latDiff = Math.abs(current.lat - center[0]);
+      const lngDiff = Math.abs(current.lng - center[1]);
+      if (latDiff < 0.0001 && lngDiff < 0.0001) return;
+      map.setView(center, map.getZoom(), { animate: true });
+    }, [center, map]);
+
+    return null;
+  }
+
   function FocusStudentRoute({ path, active }: { path: Array<[number, number]>; active: boolean }) {
     const map = useMap();
 
@@ -161,6 +175,7 @@ export function GlobalChennaiMap({ className }: { className?: string }) {
             pathOptions={{ color: "#8f4b4b", weight: 4, opacity: 0.9 }}
           />
         ) : null}
+        <SyncMapCenter center={mapCenter} />
         <FollowLiveBus position={markerPosition} active={Boolean(tracking?.isActive)} />
         {isStudentView ? (
           <FocusStudentRoute path={routePath} active={Boolean(tracking?.isActive)} />
