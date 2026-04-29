@@ -310,14 +310,22 @@ export async function seedDefaultBuses(count = 48) {
   return { ok: true, count: fallbackBuses.length };
 }
 
-export async function getApprovedDrivers() {
+export async function getApprovedDrivers(): Promise<ApprovedDriver[]> {
   const { data, error } = await supabase
     .from("drivers")
     .select("user_id, name, login_id, phone_number, created_at")
     .order("name", { ascending: true });
 
+  const localDrivers = getLocalApprovedDriverAccounts().map((driver) => ({
+    userId: driver.id,
+    name: driver.name,
+    loginId: driver.loginId,
+    phoneNumber: driver.phoneNumber,
+    createdAt: driver.createdAt,
+  } satisfies ApprovedDriver));
+
   if (error) {
-    if (isMissingSupabaseTableError(error)) return getLocalApprovedDriverAccounts();
+    if (isMissingSupabaseTableError(error)) return localDrivers;
     throw new Error(error.message);
   }
 
@@ -332,11 +340,11 @@ export async function getApprovedDrivers() {
       }) satisfies ApprovedDriver,
   );
 
-  const localDrivers = getLocalApprovedDriverAccounts().filter(
+  const uniqueLocal = localDrivers.filter(
     (localDriver) => !remoteDrivers.some((remoteDriver) => remoteDriver.userId === localDriver.userId),
   );
 
-  return [...remoteDrivers, ...localDrivers].sort((a, b) => a.name.localeCompare(b.name));
+  return [...remoteDrivers, ...uniqueLocal].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function assignDriverToBus(busId: string, driverUserId: string | null) {

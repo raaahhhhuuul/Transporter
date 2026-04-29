@@ -96,7 +96,7 @@ export function StudentDashboard() {
 
     const activeDriverUserId = driverUserId;
 
-    const key = `pulseride.driverStart.${activeDriverUserId}.${tracking.startedAt ?? "active"}`;
+    const key = `pulseride.driverStart.${activeDriverUserId}.${activeStartedAt ?? "active"}`;
     const cached = window.localStorage.getItem(key);
     if (cached) {
       try {

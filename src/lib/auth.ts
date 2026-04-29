@@ -550,10 +550,24 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
     ...localApprovals,
   ]);
 
-  // If the backend schema expects UUIDs (common), don't send local placeholder IDs.
-  // The local approval queue will still work for demo/dev even without the table.
-  if (!isUuid(registration.id)) {
-    return;
+  let registrationId = registration.id;
+  if (!isUuid(registrationId)) {
+    const { data: lookup, error: lookupError } = await supabase
+      .from("registrations")
+      .select("id")
+      .eq("user_id", registration.user_id)
+      .maybeSingle<{ id: string }>();
+
+    if (lookupError) {
+      if (isMissingSupabaseTableError(lookupError) || isSupabaseWriteAccessError(lookupError)) return;
+      throw new Error(lookupError.message);
+    }
+
+    if (!lookup?.id || !isUuid(lookup.id)) {
+      return;
+    }
+
+    registrationId = lookup.id;
   }
 
   const { data: existing, error: existingError } = await supabase
@@ -572,7 +586,7 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
   if (existing) return;
 
   const { error: insertError } = await supabase.from("login_approvals").insert({
-    registration_id: registration.id,
+    registration_id: registrationId,
     user_id: registration.user_id,
     login_id: registration.login_id,
     role: registration.role,
@@ -586,38 +600,7 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
 }
 
 export async function signUpUser(input: SignUpInput) {
-  const result = await registerUser(input);
-  // Best-effort server-side registration insert (bypasses RLS).
-  try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const userId = session?.user.id;
-    if (userId) {
-      await fetch("/api/registrations", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          userId,
-          loginId: result.loginId,
-          name: result.name,
-          phoneNumber: result.phoneNumber,
-          role: result.role,
-        }),
-      });
-
-      // Also create pending approval at signup time so admin can see requests immediately.
-      await fetch("/api/login-approvals", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ userId }),
-      });
-    }
-  } catch {
-    // Ignore: dev/demo fallback will still function.
-  }
-
-  return result;
+  return registerUser(input);
 }
 
 export async function signIn(loginId: string, password: string): Promise<AuthResult> {
@@ -692,48 +675,6 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
     throw new Error("Login approval requested. Please wait for admin approval.");
   }
 
-  // Ask server (service role) whether user is approved.
-  try {
-    const statusResponse = await fetch("/api/account-status", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ userId: data.user.id }),
-    });
-    if (statusResponse.ok) {
-      const payload = (await statusResponse.json()) as
-        | { status: "approved"; role: RegistrableRole; loginId: string; displayName: string }
-        | { status: "pending" };
-
-      if ("status" in payload && payload.status === "approved") {
-        const session = setSession(payload.role, payload.loginId, data.session?.access_token, {
-          userId: data.user.id,
-          loginId: payload.loginId,
-          displayName: payload.displayName,
-        });
-        return { session, homeRoute: getHomeRouteForRole(payload.role) };
-      }
-
-      if ("status" in payload && payload.status === "pending") {
-        // Ensure a pending approval exists server-side.
-        const approvalResponse = await fetch("/api/login-approvals", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ userId: data.user.id }),
-        });
-        if (!approvalResponse.ok) {
-          const fallbackRegistration = await getRegistrationByUserId(data.user.id);
-          if (fallbackRegistration) {
-            await createPendingLoginApproval(fallbackRegistration);
-          }
-        }
-        await supabase.auth.signOut();
-        throw new Error("Login approval requested. Please wait for admin approval.");
-      }
-    }
-  } catch {
-    // Fall back to client-side checks below.
-  }
-
   const approvedAccount = await getApprovedRoleAccount(data.user.id);
   if (approvedAccount) {
     const session = setSession(
@@ -759,33 +700,11 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
   }
 
   await createPendingLoginApproval(registration);
-  try {
-    const response = await fetch("/api/login-approvals", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ userId: data.user.id }),
-    });
-    if (!response.ok) {
-      // Server path failed; local path above has already queued approval.
-    }
-  } catch {
-    // ignore
-  }
   await supabase.auth.signOut();
   throw new Error("Login approval requested. Please wait for admin approval.");
 }
 
 export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
-  try {
-    const response = await fetch("/api/pending-approvals");
-    if (response.ok) {
-      const payload = (await response.json()) as { ok: boolean; approvals: PendingLoginApproval[] };
-      if (payload.ok) return payload.approvals;
-    }
-  } catch {
-    // fallback below
-  }
-
   const { data, error } = await supabase
     .from("login_approvals")
     .select("id, requested_at, user_id, login_id, role, registrations!inner(name, phone_number)")
@@ -812,7 +731,7 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
     throw new Error(error.message);
   }
 
-  return (data ?? []).map((item) => {
+  const remoteApprovals = (data ?? []).map((item) => {
     const registration = Array.isArray(item.registrations)
       ? item.registrations[0]
       : item.registrations;
@@ -827,22 +746,33 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
       phoneNumber: String(registration?.phone_number ?? "N/A"),
     } satisfies PendingLoginApproval;
   });
+
+  const localApprovals = getLocalLoginApprovals()
+    .filter((item) => item.status === "pending")
+    .map((item) => {
+      const registration = Array.isArray(item.registrations) ? item.registrations[0] : item.registrations;
+      return {
+        requestId: item.id,
+        requestedAt: item.requested_at,
+        userId: item.user_id,
+        loginId: item.login_id,
+        role: item.role,
+        name: String(registration?.name ?? "Unknown"),
+        phoneNumber: String(registration?.phone_number ?? "N/A"),
+      } satisfies PendingLoginApproval;
+    });
+
+  const merged = [...remoteApprovals];
+  for (const local of localApprovals) {
+    if (!merged.some((item) => item.requestId === local.requestId)) {
+      merged.push(local);
+    }
+  }
+
+  return merged;
 }
 
 export async function approveUser(requestId: string) {
-  try {
-    const response = await fetch("/api/approve", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ requestId }),
-    });
-    if (response.ok) {
-      return { id: requestId } as unknown as LoginApprovalRow;
-    }
-  } catch {
-    // fallback below
-  }
-
   const localApproval = getLocalLoginApprovals().find((item) => item.id === requestId) ?? null;
   const { data: request, error: requestError } = await supabase
     .from("login_approvals")
