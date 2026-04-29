@@ -458,7 +458,7 @@ async function getRegistrationByUserId(userId: string) {
     .maybeSingle<RegistrationRow>();
 
   if (error) {
-    if (isMissingSupabaseTableError(error)) {
+    if (isMissingSupabaseTableError(error) || isSupabaseWriteAccessError(error)) {
       return getLocalRegistrations().find((item) => item.user_id === userId) ?? null;
     }
     throw new Error(error.message);
@@ -483,11 +483,19 @@ async function getApprovedRoleAccount(userId: string) {
         .maybeSingle<ApprovedDriverRow>(),
     ]);
 
-  if (studentError && !isMissingSupabaseTableError(studentError)) {
+  if (
+    studentError &&
+    !isMissingSupabaseTableError(studentError) &&
+    !isSupabaseWriteAccessError(studentError)
+  ) {
     throw new Error(studentError.message);
   }
 
-  if (driverError && !isMissingSupabaseTableError(driverError)) {
+  if (
+    driverError &&
+    !isMissingSupabaseTableError(driverError) &&
+    !isSupabaseWriteAccessError(driverError)
+  ) {
     throw new Error(driverError.message);
   }
 

@@ -9,7 +9,7 @@ function requiredEnv(name: string): string {
 }
 
 export function getServiceSupabase() {
-  const url = requiredEnv("SUPABASE_URL");
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || requiredEnv("SUPABASE_URL");
   const serviceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
   return createClient(url, serviceKey, {
     auth: {
