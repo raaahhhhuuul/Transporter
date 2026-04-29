@@ -43,7 +43,6 @@ export function AdminDashboard() {
   const [notificationMessage, setNotificationMessage] = useState("");
   const [notificationTarget, setNotificationTarget] = useState<NotificationTargetRole>("all");
   const [sendingNotification, setSendingNotification] = useState(false);
-  const [seedingBuses, setSeedingBuses] = useState(false);
 
   useEffect(() => {
     const session = getSession();
@@ -106,6 +105,27 @@ export function AdminDashboard() {
   useEffect(() => {
     void loadAdminData();
   }, [loadAdminData]);
+
+  useEffect(() => {
+    if (buses.length !== 0) return;
+    let isMounted = true;
+
+    const seedIfNeeded = async () => {
+      try {
+        await seedDefaultBuses(48);
+        const latestBuses = await getBuses();
+        if (isMounted) setBuses(latestBuses);
+      } catch {
+        // Ignore: bus seeding requires admin write access.
+      }
+    };
+
+    void seedIfNeeded();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [buses.length]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -189,23 +209,6 @@ export function AdminDashboard() {
     }
   };
 
-  const handleSeedBuses = async () => {
-    try {
-      setSeedingBuses(true);
-      const result = await seedDefaultBuses(48);
-      const latestBuses = await getBuses();
-      setBuses(latestBuses);
-      toast.success("Buses are ready", {
-        description: `${result.count} buses are now available for assignment.`,
-      });
-    } catch (error) {
-      toast.error("Unable to create buses", {
-        description: error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setSeedingBuses(false);
-    }
-  };
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-4 sm:px-5 sm:py-5">
@@ -252,9 +255,9 @@ export function AdminDashboard() {
           </div>
 
           {buses.length === 0 ? (
-            <p className="rounded-xl border border-border bg-surface p-3 text-sm text-muted-foreground">
-              No buses found. Run the latest schema SQL to create bus records.
-            </p>
+            <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted-foreground">
+              No buses available yet.
+            </div>
           ) : (
             <div className="space-y-2">
               {buses.map((bus) => (
@@ -333,21 +336,9 @@ export function AdminDashboard() {
           </div>
 
           {buses.length === 0 ? (
-            <div className="space-y-3 rounded-xl border border-border bg-surface p-3">
-              <p className="text-sm text-muted-foreground">
-                No buses are available yet. Create the default fleet and then assign drivers.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleSeedBuses();
-                }}
-                disabled={seedingBuses}
-                className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {seedingBuses ? "Creating buses..." : "Create 48 Buses"}
-              </button>
-            </div>
+            <p className="rounded-xl border border-border bg-surface p-3 text-sm text-muted-foreground">
+              No buses available yet.
+            </p>
           ) : drivers.length === 0 ? (
             <p className="rounded-xl border border-border bg-surface p-3 text-sm text-muted-foreground">
               No approved drivers available yet.

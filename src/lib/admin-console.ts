@@ -171,7 +171,7 @@ function buildSeedBuses(count = 48): AdminBus[] {
       busNumber: `BUS-${String(number).padStart(3, "0")}`,
       routeName: routes[index % routes.length],
       plate: `TN-${String(10 + (index % 20)).padStart(2, "0")}-AB-${String(2000 + number)}`,
-      status: "inactive",
+      status: "active",
       assignedDriverUserId: null,
       assignedDriverName: null,
       assignedDriverLoginId: null,

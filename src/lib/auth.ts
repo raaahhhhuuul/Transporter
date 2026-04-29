@@ -526,6 +526,48 @@ async function getApprovedRoleAccount(userId: string) {
   return null;
 }
 
+async function ensureRegistrationForUser(
+  user: { id: string; user_metadata?: Record<string, unknown> },
+  fallbackLoginId: string,
+): Promise<RegistrationRow | null> {
+  const existing = await getRegistrationByUserId(user.id);
+  if (existing) return existing;
+
+  const meta = user.user_metadata ?? {};
+  const roleRaw = meta.role;
+  const role: RegistrableRole =
+    roleRaw === "student" || roleRaw === "driver"
+      ? roleRaw
+      : fallbackLoginId.endsWith("@srmist.edu.in")
+        ? "student"
+        : "driver";
+  const loginId = typeof meta.login_id === "string" ? meta.login_id : fallbackLoginId;
+  const name = typeof meta.name === "string" ? meta.name : loginId.split("@")[0] || "User";
+  const phoneNumber = typeof meta.phone_number === "string" ? meta.phone_number : "0000000000";
+
+  const { data, error } = await supabase
+    .from("registrations")
+    .insert({
+      user_id: user.id,
+      login_id: loginId,
+      name,
+      phone_number: phoneNumber,
+      role,
+      status: "pending",
+    })
+    .select("id, user_id, login_id, name, phone_number, role, status, created_at, approved_at")
+    .maybeSingle<RegistrationRow>();
+
+  if (error) {
+    if (isMissingSupabaseTableError(error) || isSupabaseWriteAccessError(error)) {
+      return null;
+    }
+    throw new Error(error.message);
+  }
+
+  return data ?? null;
+}
+
 async function createPendingLoginApproval(registration: RegistrationRow) {
   const localApprovals = getLocalLoginApprovals();
   if (localApprovals.some((item) => item.user_id === registration.user_id && item.status === "pending")) {
@@ -612,20 +654,29 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
   }
 
   if (ADMIN_LOGIN_ALIASES.has(normalizedLoginId)) {
-    if (normalizedPassword !== "admin123") {
-      throw new Error("Invalid admin password. Use admin123.");
+    const adminEmail = ADMIN_LOGIN_ID;
+    const { data: adminAuth, error: adminError } = await supabase.auth.signInWithPassword({
+      email: adminEmail,
+      password: normalizedPassword,
+    });
+
+    if (adminError || !adminAuth.user) {
+      throw new Error(
+        "Admin sign-in failed. Create a Supabase user with email transporter@admin.com and the admin password.",
+      );
     }
 
     const token = createMockJwt({
-      sub: normalizedLoginId,
+      sub: adminEmail,
       role: "admin",
       iss: "PulseRide",
       aud: "admin-portal",
       iat: Math.floor(Date.now() / 1000),
     });
 
-    const session = setSession("admin", normalizedLoginId, token, {
-      loginId: normalizedLoginId,
+    const session = setSession("admin", adminEmail, token, {
+      userId: adminAuth.user.id,
+      loginId: adminEmail,
       displayName: "Admin",
     });
     return {
@@ -674,6 +725,8 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
     await createPendingLoginApproval(localRegistration);
     throw new Error("Login approval requested. Please wait for admin approval.");
   }
+
+  await ensureRegistrationForUser(data.user, normalizedLoginId);
 
   const approvedAccount = await getApprovedRoleAccount(data.user.id);
   if (approvedAccount) {
