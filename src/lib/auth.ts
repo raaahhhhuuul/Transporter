@@ -943,130 +943,76 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
 
 export async function approveUser(requestId: string) {
   const localApproval = getLocalLoginApprovals().find((item) => item.id === requestId) ?? null;
-  const { data: request, error: requestError } = await supabase
-    .from("login_approvals")
-    .select("id, registration_id, user_id, login_id, role, status")
-    .eq("id", requestId)
-    .maybeSingle<LoginApprovalRow>();
 
-  if (requestError) {
-    if (isMissingSupabaseTableError(requestError) || isSupabaseWriteAccessError(requestError)) {
-      if (!localApproval) return null;
+  try {
+    const response = await fetch("/api/approve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: requestId }),
+    });
 
-      const localRegistration =
-        getLocalRegistrations().find((item) => item.id === localApproval.registration_id) ?? null;
-      if (!localRegistration) {
-        throw new Error("Registration record not found.");
-      }
+    const payload = (await response.json()) as { success: boolean; data?: unknown; error?: string };
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.error ?? "Approval failed");
+    }
 
+    if (localApproval) {
       const now = new Date().toISOString();
       saveLocalLoginApprovals(
         getLocalLoginApprovals().map((item) =>
           item.id === requestId ? { ...item, status: "approved", approved_at: now } : item,
         ),
       );
-      saveLocalRegistrations(
-        getLocalRegistrations().map((item) =>
-          item.id === localRegistration.id ? { ...item, status: "approved", approved_at: now } : item,
+    }
+
+    return payload.data ?? localApproval;
+  } catch (error) {
+    const { data: request, error: requestError } = await supabase
+      .from("login_approvals")
+      .select("id, registration_id, user_id, login_id, role, status, requested_at")
+      .eq("id", requestId)
+      .maybeSingle<LoginApprovalRow>();
+
+    if (requestError) {
+      if (isMissingSupabaseTableError(requestError) || isSupabaseWriteAccessError(requestError)) {
+        if (!localApproval) return null;
+
+        saveLocalLoginApprovals(
+          getLocalLoginApprovals().map((item) =>
+            item.id === requestId ? { ...item, status: "approved", approved_at: new Date().toISOString() } : item,
+          ),
+        );
+        return localApproval;
+      }
+      throw new Error(requestError.message);
+    }
+
+    if (!request) {
+      return null;
+    }
+
+    const { data: updatedRecord, error: approvalError } = await supabase
+      .from("login_approvals")
+      .update({ status: "approved" })
+      .eq("id", requestId)
+      .select("id, registration_id, user_id, login_id, role, status, requested_at")
+      .maybeSingle<LoginApprovalRow>();
+
+    if (approvalError) {
+      if (isMissingSupabaseTableError(approvalError) || isSupabaseWriteAccessError(approvalError)) {
+        return null;
+      }
+      throw new Error(approvalError.message);
+    }
+
+    if (localApproval) {
+      saveLocalLoginApprovals(
+        getLocalLoginApprovals().map((item) =>
+          item.id === requestId ? { ...item, status: "approved", approved_at: new Date().toISOString() } : item,
         ),
       );
-      saveLocalApprovedAccounts([
-        {
-          userId: localRegistration.user_id,
-          role: localRegistration.role,
-          loginId: localRegistration.login_id,
-          displayName: localRegistration.name,
-        },
-        ...getLocalApprovedAccounts().filter((item) => item.userId !== localRegistration.user_id),
-      ]);
-
-      return localApproval;
     }
-    throw new Error(requestError.message);
+
+    return updatedRecord ?? request;
   }
-
-  if (!request) {
-    return null;
-  }
-
-  const { data: registration, error: registrationError } = await supabase
-    .from("registrations")
-    .select("id, user_id, login_id, name, phone_number, role, status, created_at, approved_at")
-    .eq("id", request.registration_id)
-    .maybeSingle<RegistrationRow>();
-
-  if (registrationError) {
-    if (isMissingSupabaseTableError(registrationError) || isSupabaseWriteAccessError(registrationError)) {
-      return null;
-    }
-    throw new Error(registrationError.message);
-  }
-
-  if (!registration) {
-    throw new Error("Registration record not found.");
-  }
-
-  const now = new Date().toISOString();
-
-  const { error: approvalError } = await supabase
-    .from("login_approvals")
-    .update({
-      status: "approved",
-      approved_at: now,
-    })
-    .eq("id", requestId);
-
-  if (approvalError) {
-    if (isMissingSupabaseTableError(approvalError) || isSupabaseWriteAccessError(approvalError)) {
-      return null;
-    }
-    throw new Error(approvalError.message);
-  }
-
-  const { error: registrationUpdateError } = await supabase
-    .from("registrations")
-    .update({
-      status: "approved",
-      approved_at: now,
-    })
-    .eq("id", registration.id);
-
-  if (registrationUpdateError) {
-    if (isMissingSupabaseTableError(registrationUpdateError) || isSupabaseWriteAccessError(registrationUpdateError)) {
-      return null;
-    }
-    throw new Error(registrationUpdateError.message);
-  }
-
-  const tableName = registration.role === "student" ? "students" : "drivers";
-  const approvedRecord = {
-    user_id: registration.user_id,
-    registration_id: registration.id,
-    login_id: registration.login_id,
-    name: registration.name,
-    phone_number: registration.phone_number,
-  };
-
-  const { error: approvedInsertError } = await supabase.from(tableName).upsert(approvedRecord, {
-    onConflict: "user_id",
-  });
-
-  if (approvedInsertError) {
-    if (isMissingSupabaseTableError(approvedInsertError) || isSupabaseWriteAccessError(approvedInsertError)) {
-      return null;
-    }
-    throw new Error(approvedInsertError.message);
-  }
-
-  saveLocalApprovedAccounts([
-    {
-      userId: registration.user_id,
-      role: registration.role,
-      loginId: registration.login_id,
-      displayName: registration.name,
-    },
-    ...getLocalApprovedAccounts().filter((item) => item.userId !== registration.user_id),
-  ]);
-
-  return request;
 }

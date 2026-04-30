@@ -117,7 +117,7 @@ export async function approveRequest(requestId: string): Promise<boolean> {
 
   const { data: requestRow, error: requestError } = await supabase
     .from("login_approvals")
-    .select("id, registration_id, user_id, login_id, role, status")
+    .select("id, registration_id, user_id, login_id, role, status, requested_at")
     .eq("id", requestId)
     .maybeSingle();
 
@@ -127,49 +127,19 @@ export async function approveRequest(requestId: string): Promise<boolean> {
   if (requestError) throw new Error(requestError.message);
   if (!requestRow) throw new Error("Approval request not found");
 
-  const { data: registration, error: regError } = await supabase
-    .from("registrations")
-    .select("id, user_id, login_id, name, phone_number, role, status")
-    .eq("id", requestRow.registration_id)
+  const { data: updatedRecord, error: approvalUpdateError } = await supabase
+    .from("login_approvals")
+    .update({ status: "approved" })
+    .eq("id", requestId)
+    .select("id, registration_id, user_id, login_id, role, status, requested_at")
     .maybeSingle();
 
-  if (regError) throw new Error(regError.message);
-  if (!registration) throw new Error("Registration not found");
-
-  const table = registration.role === "student" ? "students" : "drivers";
-  const approvedRecord = {
-    user_id: registration.user_id,
-    registration_id: registration.id,
-    login_id: registration.login_id,
-    name: registration.name,
-    phone_number: registration.phone_number,
-  };
-
-  console.log("APPROVING -> INSERT INTO:", table, approvedRecord);
-
-  const { error: upsertError } = await supabase.from(table).upsert(approvedRecord, {
-    onConflict: "user_id",
-  });
-
-  if (upsertError) throw new Error(upsertError.message);
-
-  const now = new Date().toISOString();
-  const { error: approvalUpdateError } = await supabase
-    .from("login_approvals")
-    .update({ status: "approved", approved_at: now })
-    .eq("id", requestId);
+  console.log("APPROVE UPDATE RESULT:", updatedRecord);
 
   if (approvalUpdateError) throw new Error(approvalUpdateError.message);
 
-  const { error: registrationUpdateError } = await supabase
-    .from("registrations")
-    .update({ status: "approved", approved_at: now })
-    .eq("id", registration.id);
-
-  if (registrationUpdateError) throw new Error(registrationUpdateError.message);
-
   console.log("APPROVED USER:", requestId);
-  return true;
+  return Boolean(updatedRecord ?? requestRow);
 }
 
 interface BusRow {
