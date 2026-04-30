@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import type { Session as SupabaseSession } from "@supabase/supabase-js";
 import {
   isMissingSupabaseTableError,
   isSupabaseWriteAccessError,
@@ -771,18 +772,21 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
     throw new Error("Login approval requested. Please wait for admin approval.");
   }
 
-  let session = data.session ?? null;
-  if (!session) {
+  let authSession: SupabaseSession | null = data.session;
+  if (!authSession) {
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const { data: sessionData } = await supabase.auth.getSession();
-      session = sessionData.session ?? null;
-      console.log("SESSION:", session);
-      if (session) break;
+      const sessionResponse = await supabase.auth.getSession();
+      const currentSession = sessionResponse.data.session;
+      console.log("SESSION:", currentSession);
+      if (currentSession) {
+        authSession = currentSession;
+        break;
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
 
-  if (!session) {
+  if (!authSession) {
     throw new Error("Auth session missing after login. Please try again.");
   }
 
@@ -792,7 +796,7 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
     console.log("getUser error:", currentUserError);
   }
 
-  const sessionUser = currentUserData.user ?? session.user;
+  const sessionUser = currentUserData.user ?? authSession.user;
   if (!sessionUser) {
     throw new Error("Auth session missing user. Please try again.");
   }
@@ -809,10 +813,10 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
 
   const approvedAccount = await getApprovedRoleAccount(sessionUser.id);
   if (approvedAccount) {
-    const session = setSession(
+    const appSession = setSession(
       approvedAccount.role,
       approvedAccount.loginId,
-      session.access_token,
+      authSession.access_token,
       {
         userId: sessionUser.id,
         loginId: approvedAccount.loginId,
@@ -820,7 +824,7 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
       },
     );
     return {
-      session,
+      session: appSession,
       homeRoute: getHomeRouteForRole(approvedAccount.role),
     };
   }
