@@ -864,9 +864,12 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
 export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
   const { data, error } = await supabase
     .from("login_approvals")
-    .select("id, requested_at, user_id, email, login_id, role, registrations(name, phone_number)")
+    .select("id, requested_at, user_id, login_id, role, registrations(name, phone_number)")
     .eq("status", "pending")
     .order("requested_at", { ascending: false });
+
+  console.log("FETCH APPROVALS RESULT:", data);
+  console.log("FETCH APPROVALS ERROR:", error);
 
   if (error) {
     console.log("admin fetch approvals error:", error);
@@ -900,7 +903,7 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
       userId: item.user_id as string,
       loginId: item.login_id as string,
       role: item.role as RegistrableRole,
-      name: String(registration?.name ?? item.email ?? item.login_id ?? "Unknown"),
+      name: String(registration?.name ?? item.login_id ?? "Unknown"),
       phoneNumber: String(registration?.phone_number ?? "N/A"),
     } satisfies PendingLoginApproval;
   });
