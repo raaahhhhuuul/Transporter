@@ -55,6 +55,123 @@ export interface ActiveTripAdminItem {
   createdAt: string;
 }
 
+// Pending approval type for admin console
+export interface PendingLoginApproval {
+  requestId: string;
+  requestedAt: string;
+  userId: string;
+  loginId: string;
+  role: "student" | "driver";
+  name: string;
+  phoneNumber: string;
+}
+
+/**
+ * Fetch pending login approvals (admin)
+ */
+export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
+  const { data, error } = await supabase
+    .from("login_approvals")
+    .select(
+      `
+      id,
+      registration_id,
+      user_id,
+      login_id,
+      role,
+      status,
+      requested_at,
+      registrations(name, phone_number)
+    `,
+    )
+    .eq("status", "pending")
+    .order("requested_at", { ascending: false });
+
+  console.log("APPROVAL FETCH:", data);
+  console.log("APPROVAL ERROR:", error);
+
+  if (error) {
+    if (isMissingSupabaseTableError(error)) return [];
+    throw new Error(error.message);
+  }
+
+  return (data ?? []).map((item: any) => {
+    const reg = Array.isArray(item.registrations) ? item.registrations[0] : item.registrations;
+    return {
+      requestId: item.id as string,
+      requestedAt: item.requested_at as string,
+      userId: item.user_id as string,
+      loginId: item.login_id as string,
+      role: item.role as "student" | "driver",
+      name: String(reg?.name ?? "Unknown"),
+      phoneNumber: String(reg?.phone_number ?? "N/A"),
+    } as PendingLoginApproval;
+  });
+}
+
+/**
+ * Approve a pending request: insert into students/drivers and update statuses
+ */
+export async function approveRequest(requestId: string): Promise<boolean> {
+  console.log("APPROVAL FETCH: start", requestId);
+
+  const { data: requestRow, error: requestError } = await supabase
+    .from("login_approvals")
+    .select("id, registration_id, user_id, login_id, role, status")
+    .eq("id", requestId)
+    .maybeSingle();
+
+  console.log("APPROVAL FETCH RESULT:", requestRow);
+  console.log("APPROVAL FETCH ERROR:", requestError);
+
+  if (requestError) throw new Error(requestError.message);
+  if (!requestRow) throw new Error("Approval request not found");
+
+  const { data: registration, error: regError } = await supabase
+    .from("registrations")
+    .select("id, user_id, login_id, name, phone_number, role, status")
+    .eq("id", requestRow.registration_id)
+    .maybeSingle();
+
+  if (regError) throw new Error(regError.message);
+  if (!registration) throw new Error("Registration not found");
+
+  const table = registration.role === "student" ? "students" : "drivers";
+  const approvedRecord = {
+    user_id: registration.user_id,
+    registration_id: registration.id,
+    login_id: registration.login_id,
+    name: registration.name,
+    phone_number: registration.phone_number,
+  };
+
+  console.log("APPROVING -> INSERT INTO:", table, approvedRecord);
+
+  const { error: upsertError } = await supabase.from(table).upsert(approvedRecord, {
+    onConflict: "user_id",
+  });
+
+  if (upsertError) throw new Error(upsertError.message);
+
+  const now = new Date().toISOString();
+  const { error: approvalUpdateError } = await supabase
+    .from("login_approvals")
+    .update({ status: "approved", approved_at: now })
+    .eq("id", requestId);
+
+  if (approvalUpdateError) throw new Error(approvalUpdateError.message);
+
+  const { error: registrationUpdateError } = await supabase
+    .from("registrations")
+    .update({ status: "approved", approved_at: now })
+    .eq("id", registration.id);
+
+  if (registrationUpdateError) throw new Error(registrationUpdateError.message);
+
+  console.log("APPROVED USER:", requestId);
+  return true;
+}
+
 interface BusRow {
   id: string;
   bus_number: string;

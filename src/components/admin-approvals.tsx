@@ -1,0 +1,64 @@
+import React, { useEffect, useState } from "react";
+import { getPendingApprovals, approveRequest } from "@/lib/admin-console";
+
+export default function AdminApprovalsPanel() {
+  const [approvals, setApprovals] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [approving, setApproving] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const items = await getPendingApprovals();
+      setApprovals(items);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const handleApprove = async (requestId: string) => {
+    setApproving(requestId);
+    try {
+      await approveRequest(requestId);
+      await load();
+    } catch (err) {
+      console.error("Approve failed:", err);
+    } finally {
+      setApproving(null);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className="text-lg font-semibold">Pending Approvals</h3>
+      {loading ? (
+        <div>Loading…</div>
+      ) : (
+        <ul className="space-y-3">
+          {approvals.map((a) => (
+            <li key={a.requestId} className="flex items-center justify-between gap-4">
+              <div>
+                <div className="font-medium">{a.name} <span className="text-sm text-muted-foreground">({a.loginId})</span></div>
+                <div className="text-sm text-muted-foreground">{a.role} • {a.phoneNumber}</div>
+                <div className="text-xs text-muted-foreground">Requested: {new Date(a.requestedAt).toLocaleString()}</div>
+              </div>
+              <div>
+                <button
+                  className="rounded-md bg-primary px-3 py-1 text-white"
+                  onClick={() => void handleApprove(a.requestId)}
+                  disabled={approving === a.requestId}
+                >
+                  {approving === a.requestId ? "Approving…" : "Approve"}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
