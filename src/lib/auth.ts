@@ -674,16 +674,19 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
 
   if (existing) return;
 
+  const payload = {
+    registration_id: registrationId,
+    user_id: approvalUserId,
+    login_id: registration.login_id,
+    role: approvalRole,
+    status: "pending",
+  };
+
+  console.log("FINAL INSERT PAYLOAD:", payload);
+
   const { data: insertedRow, error: insertError } = await supabase
     .from("login_approvals")
-    .insert({
-      registration_id: registrationId,
-      user_id: approvalUserId,
-      email: approvalEmail,
-      login_id: registration.login_id,
-      role: approvalRole,
-      status: "pending",
-    })
+    .insert(payload)
     .select("id, registration_id, user_id, login_id, role, status, requested_at")
     .maybeSingle<LoginApprovalRow>();
 
