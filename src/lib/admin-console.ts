@@ -437,6 +437,8 @@ export async function getApprovedDrivers(): Promise<ApprovedDriver[]> {
 export async function assignDriverToBus(busId: string, driverUserId: string | null) {
   if (!busId) throw new Error("Bus ID is required.");
 
+  console.log("assignDriverToBus incoming:", { busId, driverUserId });
+
   const nowIso = new Date().toISOString();
   const localBuses = getLocalBuses();
   if (localBuses.length > 0) {
@@ -474,7 +476,7 @@ export async function assignDriverToBus(busId: string, driverUserId: string | nu
     }
   }
 
-  const { error } = await supabase
+  const { data: updatedRecord, error } = await supabase
     .from("buses")
     .update({
       assigned_driver_user_id: driverUserId,
@@ -486,10 +488,12 @@ export async function assignDriverToBus(busId: string, driverUserId: string | nu
     throw new Error(error.message);
   }
 
+  console.log("assignDriverToBus update result:", updatedRecord);
   return { ok: true };
 }
 
 export async function getAssignedBusForDriver(driverUserId: string) {
+  console.log("getAssignedBusForDriver incoming:", { driverUserId });
   if (!driverUserId) return null;
 
   const { data, error } = await supabase
@@ -503,6 +507,7 @@ export async function getAssignedBusForDriver(driverUserId: string) {
   if (error) {
     if (isMissingSupabaseTableError(error)) {
       const local = getLocalBuses().find((bus) => bus.assignedDriverUserId === driverUserId) ?? null;
+      console.log("getAssignedBusForDriver result (local fallback):", local);
       return local;
     }
     throw new Error(error.message);
@@ -510,10 +515,11 @@ export async function getAssignedBusForDriver(driverUserId: string) {
 
   if (!data) {
     const local = getLocalBuses().find((bus) => bus.assignedDriverUserId === driverUserId) ?? null;
+    console.log("getAssignedBusForDriver result (local):", local);
     return local;
   }
 
-  return {
+  const result = {
     id: data.id,
     busNumber: data.bus_number,
     routeName: data.route_name,
@@ -524,6 +530,9 @@ export async function getAssignedBusForDriver(driverUserId: string) {
     assignedDriverLoginId: null,
     updatedAt: data.updated_at,
   } satisfies AdminBus;
+
+  console.log("getAssignedBusForDriver result (remote):", result);
+  return result;
 }
 
 export async function getOperationQueue() {

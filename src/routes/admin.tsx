@@ -159,6 +159,7 @@ export function AdminDashboard() {
 
   const handleAssignDriver = async (busId: string, driverUserId: string | null) => {
     try {
+      console.log("admin handleAssignDriver:", { busId, driverUserId });
       setAssigningBusId(busId);
       const result = await assignDriverToBus(busId, driverUserId);
       if (result && typeof result === "object" && "ok" in result && result.ok === false) {

@@ -95,6 +95,7 @@ export function DriverPanel() {
           data: { session: supabaseSession },
         } = await supabase.auth.getSession();
         const userId = supabaseSession?.user.id ?? localSession?.userId;
+        console.log("driver loadAssignedBus userId:", userId);
         if (!userId) {
           if (!isMounted) return;
           setAssignedBus(null);
@@ -103,6 +104,7 @@ export function DriverPanel() {
           return;
         }
         const bus = await getAssignedBusForDriver(userId);
+        console.log("driver loadAssignedBus result:", bus);
         if (!isMounted) return;
         setAssignedBus(bus ? { busNumber: bus.busNumber, routeName: bus.routeName } : null);
         setAssignedBusLabel(bus ? `${bus.busNumber} · ${bus.routeName}` : null);
