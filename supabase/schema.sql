@@ -37,12 +37,16 @@ create table if not exists public.login_approvals (
   id uuid primary key default gen_random_uuid(),
   registration_id uuid not null references public.registrations(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
+  email text,
   login_id text not null,
   role text not null check (role in ('student', 'driver')),
   status text not null default 'pending' check (status in ('pending', 'approved')),
   requested_at timestamptz not null default now(),
   approved_at timestamptz
 );
+
+alter table public.login_approvals
+  add column if not exists email text;
 
 create table if not exists public.driver_live_tracking (
   user_id uuid primary key references auth.users(id) on delete cascade,

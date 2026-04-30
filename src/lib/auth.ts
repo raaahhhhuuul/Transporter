@@ -84,6 +84,7 @@ interface LoginApprovalRow {
   id: string;
   registration_id: string;
   user_id: string;
+  email?: string;
   login_id: string;
   role: RegistrableRole;
   status: "pending" | "approved";
@@ -574,13 +575,32 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
     return;
   }
 
+  const { data: authUserData, error: authUserError } = await supabase.auth.getUser();
+  console.log("USER:", authUserData);
+  if (authUserError) {
+    console.log("getUser error:", authUserError);
+  }
+
+  const authUser = authUserData.user;
+  const approvalUserId = authUser?.id ?? registration.user_id;
+  const approvalEmail = authUser?.email ?? registration.login_id;
+  const approvalRole = registration.role;
+
+  console.log("INSERT CALLED", {
+    userId: approvalUserId,
+    email: approvalEmail,
+    role: approvalRole,
+    status: "pending",
+  });
+
   saveLocalLoginApprovals([
     {
       id: `local-approval-${registration.user_id}`,
       registration_id: registration.id,
-      user_id: registration.user_id,
+      user_id: approvalUserId,
+      email: approvalEmail,
       login_id: registration.login_id,
-      role: registration.role,
+      role: approvalRole,
       status: "pending",
       requested_at: new Date().toISOString(),
       approved_at: null,
@@ -615,27 +635,36 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
   const { data: existing, error: existingError } = await supabase
     .from("login_approvals")
     .select("id")
-    .eq("user_id", registration.user_id)
+    .eq("user_id", approvalUserId)
     .eq("status", "pending")
     .limit(1)
     .maybeSingle();
 
   if (existingError) {
+    console.log("existing approval lookup error:", existingError);
     if (isMissingSupabaseTableError(existingError) || isSupabaseWriteAccessError(existingError)) return;
     throw new Error(existingError.message);
   }
 
   if (existing) return;
 
-  const { error: insertError } = await supabase.from("login_approvals").insert({
-    registration_id: registrationId,
-    user_id: registration.user_id,
-    login_id: registration.login_id,
-    role: registration.role,
-    status: "pending",
-  });
+  const { data: insertedRow, error: insertError } = await supabase
+    .from("login_approvals")
+    .insert({
+      registration_id: registrationId,
+      user_id: approvalUserId,
+      email: approvalEmail,
+      login_id: registration.login_id,
+      role: approvalRole,
+      status: "pending",
+    })
+    .select("id, user_id, email, login_id, role, status, requested_at")
+    .maybeSingle<LoginApprovalRow>();
+
+  console.log("insert result:", insertedRow);
 
   if (insertError) {
+    console.log("insertError:", insertError);
     if (isMissingSupabaseTableError(insertError) || isSupabaseWriteAccessError(insertError)) return;
     throw new Error(insertError.message);
   }
@@ -760,11 +789,12 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
 export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
   const { data, error } = await supabase
     .from("login_approvals")
-    .select("id, requested_at, user_id, login_id, role, registrations!inner(name, phone_number)")
+    .select("id, requested_at, user_id, email, login_id, role, registrations(name, phone_number)")
     .eq("status", "pending")
     .order("requested_at", { ascending: false });
 
   if (error) {
+    console.log("admin fetch approvals error:", error);
     if (isMissingSupabaseTableError(error) || isSupabaseWriteAccessError(error)) {
       return getLocalLoginApprovals()
         .filter((item) => item.status === "pending")
@@ -795,7 +825,7 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
       userId: item.user_id as string,
       loginId: item.login_id as string,
       role: item.role as RegistrableRole,
-      name: String(registration?.name ?? "Unknown"),
+      name: String(registration?.name ?? item.email ?? item.login_id ?? "Unknown"),
       phoneNumber: String(registration?.phone_number ?? "N/A"),
     } satisfies PendingLoginApproval;
   });
