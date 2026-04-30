@@ -684,7 +684,7 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
       role: approvalRole,
       status: "pending",
     })
-    .select("id, user_id, email, login_id, role, status, requested_at")
+    .select("id, registration_id, user_id, login_id, role, status, requested_at")
     .maybeSingle<LoginApprovalRow>();
 
   console.log("INSERT RESULT:", insertedRow);
