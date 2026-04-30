@@ -575,15 +575,26 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
     return;
   }
 
-  const { data: authUserData, error: authUserError } = await supabase.auth.getUser();
-  console.log("USER:", authUserData);
-  if (authUserError) {
-    console.log("getUser error:", authUserError);
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  console.log("SESSION:", sessionData.session);
+  if (sessionError) {
+    console.log("getSession error:", sessionError);
   }
 
-  const authUser = authUserData.user;
-  const approvalUserId = authUser?.id ?? registration.user_id;
-  const approvalEmail = authUser?.email ?? registration.login_id;
+  const { data: currentUserData, error: currentUserError } = await supabase.auth.getUser();
+  console.log("CURRENT USER:", currentUserData);
+  if (currentUserError) {
+    console.log("getUser error:", currentUserError);
+  }
+
+  const authUser = currentUserData.user ?? sessionData.session?.user ?? null;
+  if (!authUser) {
+    console.log("Missing auth session. Insert will not run.");
+    throw new Error("Auth session missing. Please sign in again before creating approvals.");
+  }
+
+  const approvalUserId = authUser.id;
+  const approvalEmail = authUser.email ?? registration.login_id;
   const approvalRole = registration.role;
 
   console.log("INSERT CALLED", {
@@ -661,10 +672,10 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
     .select("id, user_id, email, login_id, role, status, requested_at")
     .maybeSingle<LoginApprovalRow>();
 
-  console.log("insert result:", insertedRow);
+  console.log("INSERT RESULT:", insertedRow);
 
   if (insertError) {
-    console.log("insertError:", insertError);
+    console.log("INSERT ERROR:", insertError);
     if (isMissingSupabaseTableError(insertError) || isSupabaseWriteAccessError(insertError)) return;
     throw new Error(insertError.message);
   }
@@ -677,6 +688,8 @@ export async function signUpUser(input: SignUpInput) {
 export async function signIn(loginId: string, password: string): Promise<AuthResult> {
   const normalizedLoginId = normalizeLoginId(loginId);
   const normalizedPassword = password.trim();
+
+  console.log("LOGIN START", { loginId: normalizedLoginId });
 
   if (!normalizedLoginId || !normalizedPassword) {
     throw new Error("Login ID and password are required");
@@ -721,6 +734,9 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
     password: normalizedPassword,
   });
 
+  console.log("LOGIN RESPONSE:", data, error);
+  console.log("AUTH RESPONSE", { authData: data, authError: error });
+
   if (error || !data.user) {
     const localCredential =
       getLocalCredentials().find(
@@ -755,16 +771,50 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
     throw new Error("Login approval requested. Please wait for admin approval.");
   }
 
-  await ensureRegistrationForUser(data.user, normalizedLoginId);
+  let session = data.session ?? null;
+  if (!session) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      session = sessionData.session ?? null;
+      console.log("SESSION:", session);
+      if (session) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
 
-  const approvedAccount = await getApprovedRoleAccount(data.user.id);
+  if (!session) {
+    throw new Error("Auth session missing after login. Please try again.");
+  }
+
+  const { data: currentUserData, error: currentUserError } = await supabase.auth.getUser();
+  console.log("CURRENT USER:", currentUserData);
+  if (currentUserError) {
+    console.log("getUser error:", currentUserError);
+  }
+
+  const sessionUser = currentUserData.user ?? session.user;
+  if (!sessionUser) {
+    throw new Error("Auth session missing user. Please try again.");
+  }
+
+  console.log("AUTH USER", {
+    id: sessionUser.id,
+    email: sessionUser.email,
+  });
+
+  const registration = await ensureRegistrationForUser(sessionUser, normalizedLoginId);
+  if (!registration) {
+    throw new Error("Unable to create registration for authenticated user.");
+  }
+
+  const approvedAccount = await getApprovedRoleAccount(sessionUser.id);
   if (approvedAccount) {
     const session = setSession(
       approvedAccount.role,
       approvedAccount.loginId,
-      data.session?.access_token,
+      session.access_token,
       {
-        userId: data.user.id,
+        userId: sessionUser.id,
         loginId: approvedAccount.loginId,
         displayName: approvedAccount.displayName,
       },
@@ -775,13 +825,16 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
     };
   }
 
-  const registration = await getRegistrationByUserId(data.user.id);
-  if (!registration) {
-    await supabase.auth.signOut();
-    throw new Error("Profile not found. Please contact admin.");
-  }
+  console.log("BEFORE INSERT", {
+    user_id: sessionUser.id,
+    email: sessionUser.email,
+    login_id: registration.login_id,
+    role: registration.role,
+    status: "pending",
+  });
 
   await createPendingLoginApproval(registration);
+
   await supabase.auth.signOut();
   throw new Error("Login approval requested. Please wait for admin approval.");
 }

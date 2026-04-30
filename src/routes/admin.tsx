@@ -62,6 +62,7 @@ export function AdminDashboard() {
 
   const loadAdminData = useCallback(async () => {
     try {
+      console.log("ADMIN FETCH START");
       const [pending, busRows, driverRows, queueRows, notificationRows, activeTripRows] = await Promise.all([
         getPendingApprovals(),
         getBuses(),
