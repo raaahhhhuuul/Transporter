@@ -410,6 +410,20 @@ async function registerUser(input: SignUpInput): Promise<RegisteredUser> {
     role: input.role,
     displayName: name,
   });
+  // If Supabase didn't create a session (for example: email confirmation required),
+  // avoid attempting remote writes that will be rejected by RLS/unauthenticated rules.
+  const sessionExists = Boolean(authData.session);
+  if (!sessionExists) {
+    console.log("No auth session after signUp (email confirmation required). Skipping remote registrations upsert.");
+    return {
+      id: userId,
+      name,
+      loginId,
+      phoneNumber,
+      role: input.role,
+      createdAt: nowIso,
+    } satisfies RegisteredUser;
+  }
 
   const { data: registrationData, error: registrationError } = await supabase
     .from("registrations")
@@ -590,8 +604,8 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
 
   const authUser = currentUserData.user ?? sessionData.session?.user ?? null;
   if (!authUser) {
-    console.log("Missing auth session. Insert will not run.");
-    throw new Error("Auth session missing. Please sign in again before creating approvals.");
+    console.log("Missing auth session. Remote insert will not run; saved local approval only.");
+    return;
   }
 
   const approvalUserId = authUser.id;
@@ -739,6 +753,10 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
   console.log("AUTH RESPONSE", { authData: data, authError: error });
 
   if (error || !data.user) {
+    if (error && /email not confirmed/i.test(String(error.message ?? ""))) {
+      console.log("Sign-in failed: email not confirmed");
+      throw new Error("Email not confirmed. Please check your inbox and confirm your email before signing in.");
+    }
     const localCredential =
       getLocalCredentials().find(
         (item) => item.loginId === normalizedLoginId && item.password === normalizedPassword,
