@@ -860,14 +860,24 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
     // Fallback to direct Supabase query below.
   }
 
+  console.log("FETCHING APPROVALS...");
   const { data, error } = await supabase
     .from("login_approvals")
-    .select("id, requested_at, user_id, login_id, role, registrations(name, phone_number)")
+    .select(`
+      id,
+      registration_id,
+      user_id,
+      login_id,
+      role,
+      status,
+      requested_at,
+      registrations(name, phone_number)
+    `)
     .eq("status", "pending")
     .order("requested_at", { ascending: false });
 
-  console.log("FETCH APPROVALS RESULT:", data);
-  console.log("FETCH APPROVALS ERROR:", error);
+  console.log("DATA:", data);
+  console.log("ERROR:", error);
 
   if (error) {
     console.log("admin fetch approvals error:", error);
