@@ -589,42 +589,14 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
   if (localApprovals.some((item) => item.user_id === registration.user_id && item.status === "pending")) {
     return;
   }
-
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-  console.log("SESSION:", sessionData.session);
-  if (sessionError) {
-    console.log("getSession error:", sessionError);
-  }
-
-  const { data: currentUserData, error: currentUserError } = await supabase.auth.getUser();
-  console.log("CURRENT USER:", currentUserData);
-  if (currentUserError) {
-    console.log("getUser error:", currentUserError);
-  }
-
-  const authUser = currentUserData.user ?? sessionData.session?.user ?? null;
-  if (!authUser) {
-    console.log("Missing auth session. Remote insert will not run; saved local approval only.");
-    return;
-  }
-
-  const approvalUserId = authUser.id;
-  const approvalEmail = authUser.email ?? registration.login_id;
+  const approvalUserId = registration.user_id;
   const approvalRole = registration.role;
-
-  console.log("INSERT CALLED", {
-    userId: approvalUserId,
-    email: approvalEmail,
-    role: approvalRole,
-    status: "pending",
-  });
 
   saveLocalLoginApprovals([
     {
       id: `local-approval-${registration.user_id}`,
       registration_id: registration.id,
       user_id: approvalUserId,
-      email: approvalEmail,
       login_id: registration.login_id,
       role: approvalRole,
       status: "pending",
@@ -637,6 +609,17 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
     },
     ...localApprovals,
   ]);
+
+  try {
+    const apiResponse = await fetch("/api/login-approvals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: approvalUserId }),
+    });
+    if (apiResponse.ok) return;
+  } catch {
+    // Continue with direct insert fallback.
+  }
 
   let registrationId = registration.id;
   if (!isUuid(registrationId)) {
@@ -682,7 +665,7 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
     status: "pending",
   };
 
-  console.log("FINAL INSERT PAYLOAD:", payload);
+  console.log("FINAL INSERT PAYLOAD:", JSON.stringify(payload, null, 2));
 
   const { data: insertedRow, error: insertError } = await supabase
     .from("login_approvals")
@@ -865,6 +848,18 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
 }
 
 export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
+  try {
+    const response = await fetch("/api/pending-approvals");
+    if (response.ok) {
+      const payload = (await response.json()) as { ok: boolean; approvals: PendingLoginApproval[] };
+      if (payload.ok && Array.isArray(payload.approvals)) {
+        return payload.approvals;
+      }
+    }
+  } catch {
+    // Fallback to direct Supabase query below.
+  }
+
   const { data, error } = await supabase
     .from("login_approvals")
     .select("id, requested_at, user_id, login_id, role, registrations(name, phone_number)")
