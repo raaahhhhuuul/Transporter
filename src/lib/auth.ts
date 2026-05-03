@@ -991,6 +991,47 @@ export async function approveUser(requestId: string) {
       return null;
     }
 
+    // Insert user into drivers or students table if not already there (avoid registrations table)
+    console.log("approve fallback: attempting to insert account", { role: request.role });
+
+    const email = request.login_id;
+    const displayName = typeof email === "string" && email.includes("@") ? email.split("@")[0] : email;
+    const targetTable = request.role === "student" ? "students" : "drivers";
+
+    try {
+      const { data: existingByEmail, error: checkError } = await supabase
+        .from(targetTable)
+        .select("user_id, login_id")
+        .eq("login_id", email)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error("approve fallback: check existing error:", checkError);
+      }
+
+      if (!existingByEmail) {
+        console.log("approve fallback: inserting into", targetTable, { user_id: request.user_id, name: displayName, email });
+
+        const { error: insertError } = await supabase
+          .from(targetTable)
+          .insert({
+            user_id: request.user_id,
+            name: displayName,
+            login_id: email,
+          });
+
+        if (insertError) {
+          console.error("approve fallback: insert error:", insertError);
+        } else {
+          console.log("approve fallback: insert successful into", targetTable);
+        }
+      } else {
+        console.log("approve fallback: account already exists in", targetTable, existingByEmail);
+      }
+    } catch (e) {
+      console.error("approve fallback: insert/check failed:", e);
+    }
+
     const { data: updatedRecord, error: approvalError } = await supabase
       .from("login_approvals")
       .update({ status: "approved" })
