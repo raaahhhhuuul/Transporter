@@ -5,14 +5,11 @@ interface LoginApprovalRow {
   id: string;
   registration_id: string;
   user_id: string;
-  login_id: string;
   role: string;
   status: string;
-  requested_at: string;
-  approved_at: string | null;
   registrations?: {
     name: string;
-    phone_number: string;
+    email: string;
   };
 }
 
@@ -40,13 +37,23 @@ export default async function handler(req: any) {
     const supabase = getServiceSupabase();
 
     // Fetch the approval record
-    const { data: fetchedRecord, error: fetchError } = await supabase
+    const { data: approval, error: fetchError } = await supabase
       .from("login_approvals")
-      .select("id, registration_id, user_id, login_id, role, status, requested_at, approved_at")
+      .select(`
+        id,
+        role,
+        status,
+        user_id,
+        registration_id,
+        registrations (
+          name,
+          email
+        )
+      `)
       .eq("id", id)
       .single<LoginApprovalRow>();
 
-    console.log("approve fetched record:", fetchedRecord);
+    console.log("approve fetched record:", approval);
 
     if (fetchError) {
       if (fetchError.code === "PGRST116") {
@@ -56,17 +63,20 @@ export default async function handler(req: any) {
       return json(500, { success: false, error: fetchError.message });
     }
 
-    if (!fetchedRecord) {
+    if (!approval) {
       return json(404, { success: false, error: "Approval record not found" });
     }
 
-    // Extract user info and determine role
-    const { user_id, login_id, role } = fetchedRecord;
-    // Use login_id as email; derive a display name from it
-    const email = login_id;
-    const name = typeof login_id === "string" && login_id.includes("@") ? login_id.split("@")[0] : login_id;
+    const name = approval.registrations?.name ?? "";
+    const email = approval.registrations?.email ?? "";
+    const role = approval.role.toLowerCase();
+    const user_id = approval.user_id;
 
-    console.log("approve extracted info:", { user_id, email, name, role });
+    console.log("approve extracted info:", { name, email, role, user_id });
+
+    if (!name || !email) {
+      return json(400, { success: false, error: "Missing registration name or email" });
+    }
 
     let insertedRecord: any = null;
     const targetTable = role === "student" ? "students" : "drivers";
@@ -75,8 +85,8 @@ export default async function handler(req: any) {
     try {
       const { data: existingByEmail, error: checkErr } = await supabase
         .from(targetTable)
-        .select("user_id, login_id")
-        .eq("login_id", email)
+        .select("id")
+        .eq("email", email)
         .maybeSingle();
 
       if (checkErr) {
@@ -86,9 +96,9 @@ export default async function handler(req: any) {
       if (!existingByEmail) {
         console.log(`approve inserting into ${targetTable}:`, { user_id, name, email });
         const insertPayload: Record<string, unknown> = {
-          user_id,
+          id: user_id,
           name,
-          login_id: email,
+          email,
         };
 
         const { data: ins, error: insertError } = await supabase

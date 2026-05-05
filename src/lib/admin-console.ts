@@ -19,10 +19,16 @@ export interface AdminBus {
 }
 
 export interface ApprovedDriver {
-  userId: string;
+  id: string;
   name: string;
-  loginId: string;
-  phoneNumber: string;
+  email: string;
+  createdAt: string;
+}
+
+export interface ApprovedStudent {
+  id: string;
+  name: string;
+  email: string;
   createdAt: string;
 }
 
@@ -60,10 +66,9 @@ export interface PendingLoginApproval {
   requestId: string;
   requestedAt: string;
   userId: string;
-  loginId: string;
   role: "student" | "driver";
   name: string;
-  phoneNumber: string;
+  email: string;
 }
 
 /**
@@ -77,11 +82,10 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
       id,
       registration_id,
       user_id,
-      login_id,
       role,
       status,
       requested_at,
-      registrations(name, phone_number)
+      registrations(name, email)
     `,
     )
     .eq("status", "pending")
@@ -101,10 +105,9 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
       requestId: item.id as string,
       requestedAt: item.requested_at as string,
       userId: item.user_id as string,
-      loginId: item.login_id as string,
       role: item.role as "student" | "driver",
       name: String(reg?.name ?? "Unknown"),
-      phoneNumber: String(reg?.phone_number ?? "N/A"),
+      email: String(reg?.email ?? "N/A"),
     } as PendingLoginApproval;
   });
 }
@@ -117,7 +120,7 @@ export async function approveRequest(requestId: string): Promise<boolean> {
 
   const { data: requestRow, error: requestError } = await supabase
     .from("login_approvals")
-    .select("id, registration_id, user_id, login_id, role, status, requested_at")
+    .select("id, registration_id, user_id, role, status, requested_at")
     .eq("id", requestId)
     .maybeSingle();
 
@@ -131,7 +134,7 @@ export async function approveRequest(requestId: string): Promise<boolean> {
     .from("login_approvals")
     .update({ status: "approved" })
     .eq("id", requestId)
-    .select("id, registration_id, user_id, login_id, role, status, requested_at")
+    .select("id, registration_id, user_id, role, status, requested_at")
     .maybeSingle();
 
   console.log("APPROVE UPDATE RESULT:", updatedRecord);
@@ -153,10 +156,16 @@ interface BusRow {
 }
 
 interface DriverRow {
-  user_id: string;
+  id: string;
   name: string;
-  login_id: string;
-  phone_number: string;
+  email: string;
+  created_at: string;
+}
+
+interface StudentRow {
+  id: string;
+  name: string;
+  email: string;
   created_at: string;
 }
 
@@ -277,7 +286,7 @@ function applyDriverAssignments(
     assigned_driver_user_id: string | null;
     updated_at: string;
   }>,
-  drivers: Map<string, Pick<DriverRow, "name" | "login_id">>,
+  drivers: Map<string, Pick<DriverRow, "name" | "email">>,
   activeBusNumbers: Set<string>,
 ): AdminBus[] {
   return buses.map((bus) => {
@@ -293,7 +302,7 @@ function applyDriverAssignments(
       status: activeBusNumbers.has(bus.bus_number) ? "active" : bus.status,
       assignedDriverUserId: bus.assigned_driver_user_id,
       assignedDriverName: assignedDriver?.name ?? null,
-      assignedDriverLoginId: assignedDriver?.login_id ?? null,
+      assignedDriverLoginId: assignedDriver?.email ?? null,
       updatedAt: bus.updated_at,
     } satisfies AdminBus;
   });
@@ -301,26 +310,48 @@ function applyDriverAssignments(
 
 async function getDriverMap(driverIds: string[]) {
   if (driverIds.length === 0) {
-    return new Map<string, Pick<DriverRow, "name" | "login_id">>();
+    return new Map<string, Pick<DriverRow, "name" | "email">>();
   }
 
   const { data: drivers, error } = await supabase
     .from("drivers")
-    .select("user_id, name, login_id")
-    .in("user_id", driverIds);
+    .select("id, name, email")
+    .in("id", driverIds);
 
   if (error) {
     if (isMissingSupabaseTableError(error)) {
-      return new Map<string, Pick<DriverRow, "name" | "login_id">>();
+      return new Map<string, Pick<DriverRow, "name" | "email">>();
     }
     throw new Error(error.message);
   }
 
   return new Map(
-    ((drivers ?? []) as Array<Pick<DriverRow, "user_id" | "name" | "login_id">>).map((driver) => [
-      driver.user_id,
-      { name: driver.name, login_id: driver.login_id },
+    ((drivers ?? []) as Array<Pick<DriverRow, "id" | "name" | "email">>).map((driver) => [
+      driver.id,
+      { name: driver.name, email: driver.email },
     ]),
+  );
+}
+
+export async function getApprovedStudents(): Promise<ApprovedStudent[]> {
+  const { data, error } = await supabase
+    .from("students")
+    .select("id, name, email, created_at")
+    .order("name", { ascending: true });
+
+  if (error) {
+    if (isMissingSupabaseTableError(error)) return [];
+    throw new Error(error.message);
+  }
+
+  return ((data ?? []) as StudentRow[]).map(
+    (student) =>
+      ({
+        id: student.id,
+        name: student.name,
+        email: student.email,
+        createdAt: student.created_at,
+      }) satisfies ApprovedStudent,
   );
 }
 
@@ -354,7 +385,7 @@ export async function getBuses() {
           ...bus,
           status: activeBusNumbers.has(bus.busNumber) ? "active" : bus.status,
           assignedDriverName: assignedDriver?.name ?? bus.assignedDriverName ?? null,
-          assignedDriverLoginId: assignedDriver?.login_id ?? bus.assignedDriverLoginId ?? null,
+          assignedDriverLoginId: assignedDriver?.email ?? bus.assignedDriverLoginId ?? null,
         };
       });
     }
@@ -400,14 +431,13 @@ export async function seedDefaultBuses(count = 48) {
 export async function getApprovedDrivers(): Promise<ApprovedDriver[]> {
   const { data, error } = await supabase
     .from("drivers")
-    .select("user_id, name, login_id, phone_number, created_at")
+    .select("id, name, email, created_at")
     .order("name", { ascending: true });
 
   const localDrivers = getLocalApprovedDriverAccounts().map((driver) => ({
-    userId: driver.id,
+    id: driver.id,
     name: driver.name,
-    loginId: driver.loginId,
-    phoneNumber: driver.phoneNumber,
+    email: driver.loginId,
     createdAt: driver.createdAt,
   } satisfies ApprovedDriver));
 
@@ -419,16 +449,15 @@ export async function getApprovedDrivers(): Promise<ApprovedDriver[]> {
   const remoteDrivers = ((data ?? []) as DriverRow[]).map(
     (driver) =>
       ({
-        userId: driver.user_id,
+        id: driver.id,
         name: driver.name,
-        loginId: driver.login_id,
-        phoneNumber: driver.phone_number,
+        email: driver.email,
         createdAt: driver.created_at,
       }) satisfies ApprovedDriver,
   );
 
   const uniqueLocal = localDrivers.filter(
-    (localDriver) => !remoteDrivers.some((remoteDriver) => remoteDriver.userId === localDriver.userId),
+    (localDriver) => !remoteDrivers.some((remoteDriver) => remoteDriver.id === localDriver.id),
   );
 
   return [...remoteDrivers, ...uniqueLocal].sort((a, b) => a.name.localeCompare(b.name));

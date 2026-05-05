@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+﻿import { supabase } from "@/lib/supabase";
 import type { Session as SupabaseSession } from "@supabase/supabase-js";
 import {
   isMissingSupabaseTableError,
@@ -64,20 +64,16 @@ interface RegistrationRow {
 }
 
 interface ApprovedStudentRow {
-  user_id: string;
-  registration_id: string;
-  login_id: string;
+  id: string;
   name: string;
-  phone_number: string;
+  email: string;
   created_at: string;
 }
 
 interface ApprovedDriverRow {
-  user_id: string;
-  registration_id: string;
-  login_id: string;
+  id: string;
   name: string;
-  phone_number: string;
+  email: string;
   created_at: string;
 }
 
@@ -85,8 +81,6 @@ interface LoginApprovalRow {
   id: string;
   registration_id: string;
   user_id: string;
-  email?: string;
-  login_id: string;
   role: RegistrableRole;
   status: "pending" | "approved";
   requested_at: string;
@@ -94,11 +88,11 @@ interface LoginApprovalRow {
   registrations?:
     | {
         name: string;
-        phone_number: string;
+        email: string;
       }
     | Array<{
         name: string;
-        phone_number: string;
+        email: string;
       }>;
 }
 
@@ -288,20 +282,62 @@ function upsertLocalCredential(credential: LocalCredential) {
 }
 
 export function getLocalApprovedDriverAccounts(): RegisteredUser[] {
-  const registrations = getLocalRegistrations();
   return getLocalApprovedAccounts()
     .filter((item) => item.role === "driver")
     .map((item) => {
-      const registration = registrations.find((entry) => entry.user_id === item.userId);
       return {
         id: item.userId,
         name: item.displayName,
         loginId: item.loginId,
-        phoneNumber: registration?.phone_number ?? "N/A",
+        phoneNumber: "N/A",
         role: "driver" as const,
-        createdAt: registration?.created_at ?? new Date().toISOString(),
+        createdAt: new Date().toISOString(),
       } satisfies RegisteredUser;
     });
+}
+
+async function getApprovedAccountByEmail(email: string) {
+  const normalizedEmail = normalizeLoginId(email);
+  const localApproved = getLocalApprovedAccounts().find((item) => item.loginId === normalizedEmail) ?? null;
+
+  const [{ data: student, error: studentError }, { data: driver, error: driverError }] = await Promise.all([
+    supabase.from("students").select("id, name, email, created_at").eq("email", normalizedEmail).maybeSingle<ApprovedStudentRow>(),
+    supabase.from("drivers").select("id, name, email, created_at").eq("email", normalizedEmail).maybeSingle<ApprovedDriverRow>(),
+  ]);
+
+  if (studentError && !isMissingSupabaseTableError(studentError) && !isSupabaseWriteAccessError(studentError)) {
+    throw new Error(studentError.message);
+  }
+
+  if (driverError && !isMissingSupabaseTableError(driverError) && !isSupabaseWriteAccessError(driverError)) {
+    throw new Error(driverError.message);
+  }
+
+  if (student) {
+    return {
+      role: "student" as const,
+      loginId: student.email,
+      displayName: student.name,
+    };
+  }
+
+  if (driver) {
+    return {
+      role: "driver" as const,
+      loginId: driver.email,
+      displayName: driver.name,
+    };
+  }
+
+  if (localApproved) {
+    return {
+      role: localApproved.role,
+      loginId: localApproved.loginId,
+      displayName: localApproved.displayName,
+    };
+  }
+
+  return null;
 }
 
 export async function clearSession() {
@@ -333,7 +369,7 @@ async function registerUser(input: SignUpInput): Promise<RegisteredUser> {
     throw new Error("Password must be at least 6 characters");
   }
 
-  const authEmail = input.role === "driver" ? toDriverAuthEmail(loginId) : loginId;
+  const authEmail = loginId;
   const nowIso = new Date().toISOString();
   const localUserId = `local-user-${crypto.randomUUID()}`;
 
@@ -483,60 +519,19 @@ async function getRegistrationByUserId(userId: string) {
   return data ?? getLocalRegistrations().find((item) => item.user_id === userId) ?? null;
 }
 
-async function getApprovedRoleAccount(userId: string) {
-  const localApproved = getLocalApprovedAccounts().find((item) => item.userId === userId) ?? null;
-  const [{ data: student, error: studentError }, { data: driver, error: driverError }] =
-    await Promise.all([
-      supabase
-        .from("students")
-        .select("user_id, registration_id, login_id, name, phone_number, created_at")
-        .eq("user_id", userId)
-        .maybeSingle<ApprovedStudentRow>(),
-      supabase
-        .from("drivers")
-        .select("user_id, registration_id, login_id, name, phone_number, created_at")
-        .eq("user_id", userId)
-        .maybeSingle<ApprovedDriverRow>(),
-    ]);
+async function getApprovedRoleAccount(email: string, userId?: string) {
+  const approvedByEmail = await getApprovedAccountByEmail(email);
+  if (approvedByEmail) return approvedByEmail;
 
-  if (
-    studentError &&
-    !isMissingSupabaseTableError(studentError) &&
-    !isSupabaseWriteAccessError(studentError)
-  ) {
-    throw new Error(studentError.message);
-  }
-
-  if (
-    driverError &&
-    !isMissingSupabaseTableError(driverError) &&
-    !isSupabaseWriteAccessError(driverError)
-  ) {
-    throw new Error(driverError.message);
-  }
-
-  if (student) {
-    return {
-      role: "student" as const,
-      loginId: student.login_id,
-      displayName: student.name,
-    };
-  }
-
-  if (driver) {
-    return {
-      role: "driver" as const,
-      loginId: driver.login_id,
-      displayName: driver.name,
-    };
-  }
-
-  if (localApproved) {
-    return {
-      role: localApproved.role,
-      loginId: localApproved.loginId,
-      displayName: localApproved.displayName,
-    };
+  if (userId) {
+    const localApproved = getLocalApprovedAccounts().find((item) => item.userId === userId) ?? null;
+    if (localApproved) {
+      return {
+        role: localApproved.role,
+        loginId: localApproved.loginId,
+        displayName: localApproved.displayName,
+      };
+    }
   }
 
   return null;
@@ -597,14 +592,13 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
       id: `local-approval-${registration.user_id}`,
       registration_id: registration.id,
       user_id: approvalUserId,
-      login_id: registration.login_id,
       role: approvalRole,
       status: "pending",
       requested_at: new Date().toISOString(),
       approved_at: null,
       registrations: {
         name: registration.name,
-        phone_number: registration.phone_number,
+        email: registration.login_id,
       },
     },
     ...localApprovals,
@@ -660,7 +654,6 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
   const payload = {
     registration_id: registrationId,
     user_id: approvalUserId,
-    login_id: registration.login_id,
     role: approvalRole,
     status: "pending",
   };
@@ -670,7 +663,7 @@ async function createPendingLoginApproval(registration: RegistrationRow) {
   const { data: insertedRow, error: insertError } = await supabase
     .from("login_approvals")
     .insert(payload)
-    .select("id, registration_id, user_id, login_id, role, status, requested_at")
+    .select("id, registration_id, user_id, role, status, requested_at")
     .maybeSingle<LoginApprovalRow>();
 
   console.log("INSERT RESULT:", insertedRow);
@@ -728,7 +721,7 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
     };
   }
 
-  const authEmail = toDriverAuthEmail(normalizedLoginId);
+  const authEmail = normalizedLoginId;
 
   const { data, error } = await supabase.auth.signInWithPassword({
     email: authEmail,
@@ -815,7 +808,7 @@ export async function signIn(loginId: string, password: string): Promise<AuthRes
     throw new Error("Unable to create registration for authenticated user.");
   }
 
-  const approvedAccount = await getApprovedRoleAccount(sessionUser.id);
+  const approvedAccount = await getApprovedRoleAccount(sessionUser.email ?? normalizedLoginId, sessionUser.id);
   if (approvedAccount) {
     const appSession = setSession(
       approvedAccount.role,
@@ -867,11 +860,10 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
       id,
       registration_id,
       user_id,
-      login_id,
       role,
       status,
       requested_at,
-      registrations(name, phone_number)
+      registrations(name, email)
     `)
     .eq("status", "pending")
     .order("requested_at", { ascending: false });
@@ -890,10 +882,10 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
             requestId: item.id,
             requestedAt: item.requested_at,
             userId: item.user_id,
-            loginId: item.login_id,
+            loginId: String(registration?.email ?? "Unknown"),
             role: item.role,
             name: String(registration?.name ?? "Unknown"),
-            phoneNumber: String(registration?.phone_number ?? "N/A"),
+            phoneNumber: String(registration?.email ?? "N/A"),
           } satisfies PendingLoginApproval;
         });
     }
@@ -909,10 +901,10 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
       requestId: item.id as string,
       requestedAt: item.requested_at as string,
       userId: item.user_id as string,
-      loginId: item.login_id as string,
+      loginId: String(registration?.email ?? "Unknown"),
       role: item.role as RegistrableRole,
-      name: String(registration?.name ?? item.login_id ?? "Unknown"),
-      phoneNumber: String(registration?.phone_number ?? "N/A"),
+      name: String(registration?.name ?? registration?.email ?? "Unknown"),
+      phoneNumber: String(registration?.email ?? "N/A"),
     } satisfies PendingLoginApproval;
   });
 
@@ -924,10 +916,10 @@ export async function getPendingApprovals(): Promise<PendingLoginApproval[]> {
         requestId: item.id,
         requestedAt: item.requested_at,
         userId: item.user_id,
-        loginId: item.login_id,
+        loginId: String(registration?.email ?? "Unknown"),
         role: item.role,
         name: String(registration?.name ?? "Unknown"),
-        phoneNumber: String(registration?.phone_number ?? "N/A"),
+        phoneNumber: String(registration?.email ?? "N/A"),
       } satisfies PendingLoginApproval;
     });
 
@@ -969,7 +961,7 @@ export async function approveUser(requestId: string) {
   } catch (error) {
     const { data: request, error: requestError } = await supabase
       .from("login_approvals")
-      .select("id, registration_id, user_id, login_id, role, status, requested_at")
+      .select("id, registration_id, user_id, role, status, requested_at")
       .eq("id", requestId)
       .maybeSingle<LoginApprovalRow>();
 
@@ -994,15 +986,16 @@ export async function approveUser(requestId: string) {
     // Insert user into drivers or students table if not already there (avoid registrations table)
     console.log("approve fallback: attempting to insert account", { role: request.role });
 
-    const email = request.login_id;
-    const displayName = typeof email === "string" && email.includes("@") ? email.split("@")[0] : email;
+    const registration = Array.isArray(request.registrations) ? request.registrations[0] : request.registrations;
+    const email = String(registration?.email ?? "");
+    const displayName = String(registration?.name ?? email.split("@")[0] ?? "");
     const targetTable = request.role === "student" ? "students" : "drivers";
 
     try {
       const { data: existingByEmail, error: checkError } = await supabase
         .from(targetTable)
-        .select("user_id, login_id")
-        .eq("login_id", email)
+        .select("id")
+        .eq("email", email)
         .maybeSingle();
 
       if (checkError) {
@@ -1015,9 +1008,9 @@ export async function approveUser(requestId: string) {
         const { error: insertError } = await supabase
           .from(targetTable)
           .insert({
-            user_id: request.user_id,
+            id: request.user_id,
             name: displayName,
-            login_id: email,
+            email,
           });
 
         if (insertError) {
@@ -1036,7 +1029,7 @@ export async function approveUser(requestId: string) {
       .from("login_approvals")
       .update({ status: "approved" })
       .eq("id", requestId)
-      .select("id, registration_id, user_id, login_id, role, status, requested_at")
+      .select("id, registration_id, user_id, role, status, requested_at")
       .maybeSingle<LoginApprovalRow>();
 
     if (approvalError) {

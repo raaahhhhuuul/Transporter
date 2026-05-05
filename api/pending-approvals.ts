@@ -15,10 +15,9 @@ export default async function handler(req: Request) {
         registration_id,
         requested_at,
         user_id,
-        login_id,
         role,
         status,
-        registrations(name, phone_number)
+        registrations(name, email)
       `)
       .eq("status", "pending")
       .order("requested_at", { ascending: false });
@@ -40,10 +39,10 @@ export default async function handler(req: Request) {
           requestId: item.id as string,
           requestedAt: item.requested_at as string,
           userId: item.user_id as string,
-          loginId: item.login_id as string,
+          loginId: String(reg?.email ?? "Unknown"),
           role: item.role as "student" | "driver",
           name: String(reg?.name ?? "Unknown"),
-          phoneNumber: String(reg?.phone_number ?? "N/A"),
+          phoneNumber: String(reg?.email ?? "N/A"),
         };
       }) ?? [];
 

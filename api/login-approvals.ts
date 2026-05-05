@@ -25,7 +25,7 @@ export default async function handler(req: Request) {
 
     const { data: registration, error: regError } = await supabase
       .from("registrations")
-      .select("id, user_id, login_id, role, status")
+      .select("id, user_id, name, email, role, status")
       .eq("user_id", input.userId)
       .maybeSingle();
 
@@ -61,7 +61,6 @@ export default async function handler(req: Request) {
     const { error: insertError } = await supabase.from("login_approvals").insert({
       registration_id: registration.id,
       user_id: input.userId,
-      login_id: registration.login_id,
       role: registration.role,
       status: "pending",
     });

@@ -15,6 +15,7 @@ import {
   getActiveTrips,
   getAdminNotifications,
   getApprovedDrivers,
+  getApprovedStudents,
   getBuses,
   getOperationQueue,
   seedDefaultBuses,
@@ -32,6 +33,7 @@ export function AdminDashboard() {
   const [pendingApprovals, setPendingApprovals] = useState<PendingLoginApproval[]>([]);
   const [buses, setBuses] = useState<AdminBus[]>([]);
   const [drivers, setDrivers] = useState<ApprovedDriver[]>([]);
+  const [students, setStudents] = useState<import("@/lib/admin-console").ApprovedStudent[]>([]);
   const [operationQueue, setOperationQueue] = useState<OperationQueueItem[]>([]);
   const [activeTrips, setActiveTrips] = useState<ActiveTripAdminItem[]>([]);
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);
@@ -63,10 +65,11 @@ export function AdminDashboard() {
   const loadAdminData = useCallback(async () => {
     try {
       console.log("ADMIN FETCH START");
-      const [pending, busRows, driverRows, queueRows, notificationRows, activeTripRows] = await Promise.all([
+      const [pending, busRows, driverRows, studentRows, queueRows, notificationRows, activeTripRows] = await Promise.all([
         getPendingApprovals(),
         getBuses(),
         getApprovedDrivers(),
+        getApprovedStudents(),
         getOperationQueue(),
         getAdminNotifications(),
         getActiveTrips(),
@@ -75,6 +78,7 @@ export function AdminDashboard() {
       setPendingApprovals(pending);
       setBuses(busRows);
       setDrivers(driverRows);
+      setStudents(studentRows);
       setOperationQueue(queueRows);
       setNotifications(notificationRows);
       setActiveTrips(activeTripRows);
@@ -87,14 +91,16 @@ export function AdminDashboard() {
 
   const refreshLiveSections = useCallback(async () => {
     try {
-      const [busRows, queueRows, notificationRows, activeTripRows] = await Promise.all([
+      const [busRows, studentRows, queueRows, notificationRows, activeTripRows] = await Promise.all([
         getBuses(),
+        getApprovedStudents(),
         getOperationQueue(),
         getAdminNotifications(),
         getActiveTrips(),
       ]);
 
       setBuses(busRows);
+      setStudents(studentRows);
       setOperationQueue(queueRows);
       setNotifications(notificationRows);
       setActiveTrips(activeTripRows);
@@ -136,7 +142,7 @@ export function AdminDashboard() {
     return () => window.clearInterval(timer);
   }, [refreshLiveSections]);
 
-  const handleApprove = async (requestId: string, loginId: string) => {
+  const handleApprove = async (requestId: string, email: string) => {
     try {
       const approved = await approveUser(requestId);
       if (!approved) {
@@ -148,8 +154,10 @@ export function AdminDashboard() {
 
       const latestDrivers = await getApprovedDrivers();
       setDrivers(latestDrivers);
+      const latestStudents = await getApprovedStudents();
+      setStudents(latestStudents);
 
-      toast.success("Login approved", { description: `${loginId} can now sign in.` });
+      toast.success("Login approved", { description: `${email} can now sign in.` });
     } catch (error) {
       toast.error("Approval failed", {
         description: error instanceof Error ? error.message : "Please try again.",
@@ -368,11 +376,32 @@ export function AdminDashboard() {
                   >
                     <option value="">Unassigned</option>
                     {drivers.map((driver) => (
-                      <option key={driver.userId} value={driver.userId}>
-                        {driver.name} ({driver.loginId})
+                      <option key={driver.id} value={driver.id}>
+                        {driver.name}
                       </option>
                     ))}
                   </select>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-border bg-card p-4 shadow-card sm:p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <UserRoundCog className="h-5 w-5 text-primary" />
+            <h2 className="font-display text-xl font-bold">Approved Students</h2>
+          </div>
+          {students.length === 0 ? (
+            <p className="rounded-xl border border-border bg-surface p-3 text-sm text-muted-foreground">
+              No approved students yet.
+            </p>
+          ) : (
+            <div className="space-y-2.5">
+              {students.map((student) => (
+                <div key={student.id} className="rounded-xl border border-border bg-surface p-3">
+                  <p className="text-sm font-semibold text-foreground">{student.name}</p>
+                  <p className="text-xs text-muted-foreground">{student.email}</p>
                 </div>
               ))}
             </div>
