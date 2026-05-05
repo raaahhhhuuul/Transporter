@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { AlertCircle, Bus, Lock, Mail, Loader2, Phone, Truck, UserRound } from "lucide-react";
+import { AlertCircle, Bus, Lock, Mail, Loader2, Truck, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { getSession, signUpUser, type RegistrableRole } from "@/lib/auth";
 
@@ -10,7 +10,6 @@ export function SignUpPage() {
   const [role, setRole] = useState<RegistrableRole>("student");
   const [name, setName] = useState("");
   const [loginId, setLoginId] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -25,18 +24,13 @@ export function SignUpPage() {
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
 
-    if (!name || !loginId || !phoneNumber || !password || !confirmPassword) {
+    if (!name || !loginId || !password || !confirmPassword) {
       toast.error("Please fill all fields.");
       return;
     }
 
     if (role === "student" && !loginId.trim().toLowerCase().endsWith("@srmist.edu.in")) {
       toast.error("Student signup requires @srmist.edu.in email.");
-      return;
-    }
-
-    if (!/^\+?[0-9]{10,15}$/.test(phoneNumber.trim())) {
-      toast.error("Enter a valid phone number.");
       return;
     }
 
@@ -56,14 +50,13 @@ export function SignUpPage() {
         await signUpUser({
           name,
           loginId,
-          phoneNumber,
           role,
           password,
         });
 
         setLoading(false);
         toast.success("Signup submitted", {
-          description: "Account created successfully. Approval will be requested when you login.",
+          description: "Account created successfully. Approval request sent to admin.",
         });
         navigate("/login");
       } catch (error) {
@@ -140,25 +133,13 @@ export function SignUpPage() {
               icon={
                 role === "student" ? <Mail className="h-4 w-4" /> : <Truck className="h-4 w-4" />
               }
-              label={role === "student" ? "Student email" : "Driver login ID"}
+              label={role === "student" ? "Student email" : "Driver email"}
             >
               <input
-                type={role === "student" ? "email" : "text"}
+                type="email"
                 value={loginId}
                 onChange={(event) => setLoginId(event.target.value)}
-                placeholder={role === "student" ? "name@srmist.edu.in" : "driver001"}
-                className="w-full bg-transparent text-sm font-medium text-foreground placeholder:text-muted-foreground focus:outline-none"
-              />
-            </Field>
-            <Field
-              icon={<Phone className="h-4 w-4" />}
-              label="Phone number"
-            >
-              <input
-                type="tel"
-                value={phoneNumber}
-                onChange={(event) => setPhoneNumber(event.target.value)}
-                placeholder="e.g. +919876543210"
+                placeholder={role === "student" ? "name@srmist.edu.in" : "driver@company.com"}
                 className="w-full bg-transparent text-sm font-medium text-foreground placeholder:text-muted-foreground focus:outline-none"
               />
             </Field>

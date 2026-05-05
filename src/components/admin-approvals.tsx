@@ -44,8 +44,8 @@ export default function AdminApprovalsPanel() {
         {approvals.map((a) => (
           <li key={a.requestId} className="flex items-center justify-between gap-4">
             <div>
-              <div className="font-medium">{a.name} <span className="text-sm text-muted-foreground">({a.loginId})</span></div>
-              <div className="text-sm text-muted-foreground">{a.role} • {a.phoneNumber}</div>
+              <div className="font-medium">{a.name} <span className="text-sm text-muted-foreground">({a.email})</span></div>
+              <div className="text-sm text-muted-foreground">{a.role}</div>
               <div className="text-xs text-muted-foreground">Requested: {new Date(a.requestedAt).toLocaleString()}</div>
             </div>
             <div>

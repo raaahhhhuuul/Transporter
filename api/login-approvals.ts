@@ -2,6 +2,8 @@ import { getServiceSupabase, json } from "./_supabase";
 
 type Input = {
   userId: string;
+  role: "student" | "driver";
+  registrationId: string;
 };
 
 export default async function handler(req: Request) {
@@ -16,28 +18,12 @@ export default async function handler(req: Request) {
     return json(400, { error: "Invalid JSON" });
   }
 
-  if (!input.userId) {
-    return json(400, { error: "Missing userId" });
+  if (!input.userId || !input.role || !input.registrationId) {
+    return json(400, { error: "Missing userId, role, or registrationId" });
   }
 
   try {
     const supabase = getServiceSupabase();
-
-    const { data: registration, error: regError } = await supabase
-      .from("registrations")
-      .select("id, user_id, name, email, role, status")
-      .eq("user_id", input.userId)
-      .maybeSingle();
-
-    if (regError) {
-      console.error("login-approvals registrations lookup error:", regError);
-      const code = (regError as any)?.code ?? (regError as any)?.status;
-      if (code === "PGRST116" || code === 404) return json(200, { ok: true, alreadyPending: false });
-      return json(500, { error: regError.message });
-    }
-    if (!registration) {
-      return json(404, { error: "Registration not found" });
-    }
 
     const { data: existing, error: existingError } = await supabase
       .from("login_approvals")
@@ -58,10 +44,17 @@ export default async function handler(req: Request) {
       return json(200, { ok: true, alreadyPending: true });
     }
 
-    const { error: insertError } = await supabase.from("login_approvals").insert({
-      registration_id: registration.id,
+    console.log("login-approvals insert payload:", {
+      registration_id: input.registrationId,
       user_id: input.userId,
-      role: registration.role,
+      role: input.role,
+      status: "pending",
+    });
+
+    const { error: insertError } = await supabase.from("login_approvals").insert({
+      registration_id: input.registrationId,
+      user_id: input.userId,
+      role: input.role,
       status: "pending",
     });
 

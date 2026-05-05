@@ -23,13 +23,13 @@ export default async function handler(req: Request) {
   const [{ data: student }, { data: driver }] = await Promise.all([
     supabase
       .from("students")
-      .select("login_id, name")
-      .eq("user_id", input.userId)
+      .select("id, name, email")
+      .eq("id", input.userId)
       .maybeSingle(),
     supabase
       .from("drivers")
-      .select("login_id, name")
-      .eq("user_id", input.userId)
+      .select("id, name, email")
+      .eq("id", input.userId)
       .maybeSingle(),
   ]);
 
@@ -38,7 +38,7 @@ export default async function handler(req: Request) {
       ok: true,
       status: "approved",
       role: "student",
-      loginId: student.login_id,
+      email: student.email,
       displayName: student.name,
     });
   }
@@ -48,7 +48,7 @@ export default async function handler(req: Request) {
       ok: true,
       status: "approved",
       role: "driver",
-      loginId: driver.login_id,
+      email: driver.email,
       displayName: driver.name,
     });
   }

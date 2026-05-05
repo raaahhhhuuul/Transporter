@@ -434,27 +434,24 @@ export async function getApprovedDrivers(): Promise<ApprovedDriver[]> {
     .select("id, name, email, created_at")
     .order("name", { ascending: true });
 
-  const localDrivers = getLocalApprovedDriverAccounts().map((driver) => ({
+  const localDrivers: ApprovedDriver[] = getLocalApprovedDriverAccounts().map((driver) => ({
     id: driver.id,
     name: driver.name,
-    email: driver.loginId,
+    email: driver.email,
     createdAt: driver.createdAt,
-  } satisfies ApprovedDriver));
+  }));
 
   if (error) {
     if (isMissingSupabaseTableError(error)) return localDrivers;
     throw new Error(error.message);
   }
 
-  const remoteDrivers = ((data ?? []) as DriverRow[]).map(
-    (driver) =>
-      ({
-        id: driver.id,
-        name: driver.name,
-        email: driver.email,
-        createdAt: driver.created_at,
-      }) satisfies ApprovedDriver,
-  );
+  const remoteDrivers: ApprovedDriver[] = ((data ?? []) as DriverRow[]).map((driver) => ({
+    id: driver.id,
+    name: driver.name,
+    email: driver.email,
+    createdAt: driver.created_at,
+  }));
 
   const uniqueLocal = localDrivers.filter(
     (localDriver) => !remoteDrivers.some((remoteDriver) => remoteDriver.id === localDriver.id),
@@ -493,31 +490,21 @@ export async function assignDriverToBus(busId: string, driverUserId: string | nu
     saveLocalBuses(updatedLocal);
   }
 
-  if (driverUserId) {
-    const { error: clearExistingError } = await supabase
-      .from("buses")
-      .update({ assigned_driver_user_id: null, updated_at: nowIso })
-      .eq("assigned_driver_user_id", driverUserId)
-      .neq("id", busId);
+  const response = await fetch("/api/assign", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      busId,
+      driverId: driverUserId,
+    }),
+  });
 
-    if (clearExistingError && !isMissingSupabaseTableError(clearExistingError)) {
-      throw new Error(clearExistingError.message);
-    }
+  const payload = (await response.json()) as { success: boolean; error?: string };
+  if (!response.ok || !payload.success) {
+    return { ok: false, error: payload.error ?? "Assignment failed" };
   }
 
-  const { data: updatedRecord, error } = await supabase
-    .from("buses")
-    .update({
-      assigned_driver_user_id: driverUserId,
-      updated_at: nowIso,
-    })
-    .eq("id", busId);
-
-  if (error && !isMissingSupabaseTableError(error)) {
-    throw new Error(error.message);
-  }
-
-  console.log("assignDriverToBus update result:", updatedRecord);
+  console.log("assignDriverToBus update result:", payload);
   return { ok: true };
 }
 

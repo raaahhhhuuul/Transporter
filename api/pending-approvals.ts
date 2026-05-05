@@ -39,10 +39,9 @@ export default async function handler(req: Request) {
           requestId: item.id as string,
           requestedAt: item.requested_at as string,
           userId: item.user_id as string,
-          loginId: String(reg?.email ?? "Unknown"),
           role: item.role as "student" | "driver",
           name: String(reg?.name ?? "Unknown"),
-          phoneNumber: String(reg?.email ?? "N/A"),
+          email: String(reg?.email ?? "N/A"),
         };
       }) ?? [];
 

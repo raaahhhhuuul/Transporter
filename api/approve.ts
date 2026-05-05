@@ -74,6 +74,10 @@ export default async function handler(req: any) {
 
     console.log("approve extracted info:", { name, email, role, user_id });
 
+    if (approval.status !== "pending") {
+      return json(409, { success: false, error: "Approval is not pending" });
+    }
+
     if (!name || !email) {
       return json(400, { success: false, error: "Missing registration name or email" });
     }
@@ -136,7 +140,11 @@ export default async function handler(req: any) {
       return json(500, { success: false, error: updateError.message });
     }
 
-    return json(200, { success: true, data: updatedRecord, inserted: insertedRecord });
+    return json(200, {
+      success: true,
+      role,
+      userId: user_id,
+    });
   } catch (err) {
     console.error("approve handler failed:", err);
     return json(500, { success: false, error: (err instanceof Error && err.message) || String(err) });

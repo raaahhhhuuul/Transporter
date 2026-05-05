@@ -315,7 +315,7 @@ export function AdminDashboard() {
                 <div>
                   <p className="text-sm font-semibold text-foreground">{user.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {user.role.toUpperCase()} · {user.loginId} · {user.phoneNumber}
+                    {user.role.toUpperCase()} · {user.email}
                   </p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     Requested: {new Date(user.requestedAt).toLocaleString()}
@@ -325,7 +325,7 @@ export function AdminDashboard() {
                   <button
                     type="button"
                     onClick={() => {
-                      void handleApprove(user.requestId, user.loginId);
+                      void handleApprove(user.requestId, user.email);
                     }}
                     className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
                   >

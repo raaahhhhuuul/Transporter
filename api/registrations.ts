@@ -1,11 +1,8 @@
 import { getServiceSupabase, json } from "./_supabase";
 
 type Input = {
-  userId: string;
-  loginId: string;
   name: string;
-  phoneNumber: string;
-  role: "student" | "driver";
+  email: string;
 };
 
 export default async function handler(req: Request) {
@@ -20,7 +17,7 @@ export default async function handler(req: Request) {
     return json(400, { error: "Invalid JSON" });
   }
 
-  if (!input.userId || !input.loginId || !input.name || !input.phoneNumber || !input.role) {
+  if (!input.name || !input.email) {
     return json(400, { error: "Missing required fields" });
   }
 
@@ -30,16 +27,12 @@ export default async function handler(req: Request) {
     .from("registrations")
     .upsert(
       {
-        user_id: input.userId,
-        login_id: input.loginId,
         name: input.name,
-        phone_number: input.phoneNumber,
-        role: input.role,
-        status: "pending",
+        email: input.email,
       },
-      { onConflict: "user_id" },
+      { onConflict: "email" },
     )
-    .select("id, user_id, login_id, name, phone_number, role, status, created_at, approved_at")
+    .select("id, name, email")
     .maybeSingle();
 
   if (error) {
